@@ -7,8 +7,10 @@ import {
 } from '../utils/statistics.js'
 import {
   computeSignalZoo, computeRollingIC, computeEnsemble, decomposeSignal,
-  computeCompositeIndex, consensusGate, walkForwardAccuracy, monteCarloSignalPass
+  computeCompositeIndex, consensusGate, walkForwardAccuracy, monteCarloSignalPass,
+  smaCrossover,
 } from '../utils/signals.js'
+import { garch11, ccf, rankNormalize } from '../utils/statistics.js'
 import {
   buildJaccardMatrix, centralityScores, clusteringCoefficients,
   followerMultipliers, syncClusterStrength, homophilyScore, networkResilience
@@ -277,9 +279,60 @@ export default function useDerivedMetrics({ trades, snapshots, pmEvents, attenti
     return { d, p, significant: p < 0.05 }
   }, [bojSeries])
 
+  // ── GARCH(1,1) volatility on BOJ price returns ───────────────
+  const garchResult = useMemo(() => {
+    if (bojSeries.length < 5) return null
+    const returns = bojSeries.slice(1).map((s, i) => s.pHike - bojSeries[i].pHike)
+    return garch11(returns)
+  }, [bojSeries])
+
+  // ── SMA 7/21 crossover on SI_raw series ───────────────────────
+  const smaCrossoverResult = useMemo(() => {
+    if (bojSeries.length < 3) return null
+    return smaCrossover(bojSeries.map(s => s.siRaw), 7, 21)
+  }, [bojSeries])
+
+  // ── CCF at lags 1,3,7 (SI_raw vs pHike) ──────────────────────
+  const ccfResult = useMemo(() => {
+    if (bojSeries.length < 10) return []
+    const siArr = bojSeries.map(s => s.siRaw)
+    const pArr  = bojSeries.map(s => s.pHike)
+    return ccf(siArr, pArr, [1, 3, 7])
+  }, [bojSeries])
+
+  // ── Rank normalisation robustness (3rd normalisation method) ──
+  const rankRobustness = useMemo(() => {
+    const raw = bojSeries.map(s => s.siRaw).filter(v => v != null)
+    if (raw.length < 3) return null
+    const ranked  = rankNormalize(raw)
+    const zScored = raw.map(v => {
+      const mu = mean(raw), sd = stddev(raw)
+      return sd > 0 ? (v - mu) / sd : 0
+    })
+    return pearson(ranked, zScored)  // agreement between rank and z-score
+  }, [bojSeries])
+
+  // ── Bridging Agents: traders active in multiple markets ──────
+  const bridgingAgents = useMemo(() => {
+    return WALLETS
+      .map(w => {
+        const myTrades = trades.filter(t => t.trader === w.address.toLowerCase())
+        const markets  = [...new Set(myTrades.map(t => t.market))]
+        return { name: w.name, address: w.address, marketsCount: markets.length }
+      })
+      .filter(w => w.marketsCount >= 2)
+      .map(w => w.name)
+  }, [trades])
+
   // ── Lens 6: Demand Data ───────────────────────────────────────
-  // Decision Lead Time: placeholder until official announcement available
-  const dlt = null  // T_official - T_signal_threshold: computed post-resolution
+  // Decision Lead Time: hours from first threshold crossing to present date
+  // (proxy: first time SI_raw crossed 0.02 HIKE threshold)
+  const dlt = useMemo(() => {
+    if (!bojSeries.length) return null
+    const firstHike = bojSeries.find(s => s.siRaw > 0.02)
+    if (!firstHike) return null
+    return Math.floor((Date.now() / 1000 - firstHike.timestamp) / 3600)  // hours
+  }, [bojSeries])
 
   // Actionable Threshold: signal value at which action is triggered
   const actionableThreshold = useMemo(() => {
@@ -340,6 +393,13 @@ export default function useDerivedMetrics({ trades, snapshots, pmEvents, attenti
     // Lens 6
     dlt,
     actionableThreshold,
+
+    // Advanced analytics
+    garchResult,
+    smaCrossoverResult,
+    ccfResult,
+    rankRobustness,
+    bridgingAgents,
   }
 }
 

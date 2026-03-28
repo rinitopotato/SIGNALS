@@ -34,6 +34,7 @@ export default function NetworkTab({ metrics = {}, trades = [], snapshots = [] }
     clusteringCCs: globalCCs,
     followerMults,
     scs, hs, resilience, humanCapital,
+    bridgingAgents,
   } = metrics
 
   // Filter trades by selected market for per-market matrix
@@ -113,6 +114,21 @@ export default function NetworkTab({ metrics = {}, trades = [], snapshots = [] }
         {marketId !== 'all' && (
           <div style={{ marginTop: 6, fontSize: 11, color: 'var(--fg2)' }}>
             Jaccard matrix and centrality computed from {filteredTrades.length} trades in {selectedMktMeta?.label ?? marketId}.
+          </div>
+        )}
+        {bridgingAgents?.length > 0 && (
+          <div style={{ marginTop: 10, display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+            <span style={{ fontSize: 11, color: 'var(--fg2)' }}>Bridging Agents (≥2 markets):</span>
+            {bridgingAgents.map(name => (
+              <span key={name} style={{
+                padding: '2px 8px', borderRadius: 4,
+                background: 'rgba(108,143,255,0.15)', border: '1px solid var(--accent)',
+                fontSize: 11, fontWeight: 600, color: 'var(--accent)',
+              }}>
+                {name}
+              </span>
+            ))}
+            <span style={{ fontSize: 10, color: 'var(--fg2)', fontStyle: 'italic' }}>NCM Ch.3 — bridge across strong-tie clusters</span>
           </div>
         )}
       </div>

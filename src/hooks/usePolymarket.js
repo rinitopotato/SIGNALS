@@ -1,6 +1,6 @@
 import { useCallback } from 'react'
 import usePolling from './usePolling.js'
-import { fetchGammaEvents, enrichEventMarkets, fetchEventHistories } from '../api/polymarket.js'
+import { fetchGammaEvents, enrichEventMarkets, fetchEventHistories, fetchEventOrderBooks } from '../api/polymarket.js'
 import { POLYMARKET_EVENTS } from '../constants/markets.js'
 import { POLL_INTERVALS } from '../constants/endpoints.js'
 
@@ -23,8 +23,16 @@ export default function usePolymarket() {
     const withHistory = await Promise.allSettled(
       enrichedEvents.map(ev => (ev.error ? Promise.resolve(ev) : fetchEventHistories(ev)))
     )
+    const historyEvents = withHistory.map((r, i) =>
+      r.status === 'fulfilled' ? r.value : enrichedEvents[i]
+    )
 
-    return withHistory.map(r => r.status === 'fulfilled' ? r.value : null)
+    // 4. Fetch order book data (OBI, micro-price) for primary market
+    const withBooks = await Promise.allSettled(
+      historyEvents.map(ev => (ev.error ? Promise.resolve(ev) : fetchEventOrderBooks(ev)))
+    )
+
+    return withBooks.map(r => r.status === 'fulfilled' ? r.value : null)
   }, [])
 
   const { data, error, lastFetchedAt, isLoading, refetch } =

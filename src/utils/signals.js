@@ -166,3 +166,66 @@ export function monteCarloSignalPass(series, n = 500) {
   const passing = boots.filter(d => d === baselineDir).length
   return passing / n
 }
+
+// ── SMA Crossover (7/21) ──────────────────────────────────────────
+// Golden cross: MA7 crosses above MA21 → bullish
+// Death cross: MA7 crosses below MA21 → bearish
+// NCM Ch.16: Information Cascades — crossover marks cascade onset
+export function smaCrossover(series, shortW = 7, longW = 21) {
+  const ma7  = rollingMean(series, shortW)
+  const ma21 = rollingMean(series, longW)
+  const crossovers = []
+  for (let i = 1; i < series.length; i++) {
+    if (ma7[i] == null || ma21[i] == null || ma7[i-1] == null || ma21[i-1] == null) continue
+    const wasBelowOrEqual = ma7[i-1] <= ma21[i-1]
+    const nowAbove        = ma7[i]  >  ma21[i]
+    const wasAboveOrEqual = ma7[i-1] >= ma21[i-1]
+    const nowBelow        = ma7[i]  <  ma21[i]
+    if (wasBelowOrEqual && nowAbove) crossovers.push({ idx: i, type: 'golden' })
+    if (wasAboveOrEqual && nowBelow) crossovers.push({ idx: i, type: 'death' })
+  }
+  // Detect information cascade: ≥3 direction-consistent crossings in window
+  const recentGolden = crossovers.filter(c => c.type === 'golden').length
+  const recentDeath  = crossovers.filter(c => c.type === 'death').length
+  const cascadeDetected = recentGolden >= 3 || recentDeath >= 3
+  return { ma7, ma21, crossovers, cascadeDetected }
+}
+
+// ── Negative Hype Trap detection ─────────────────────────────────
+// Flag when search volume is a spike (>spikeThreshold×median) but price drops
+// volumeSeries: attention proxy values; priceSeries: corresponding prices
+export function detectNegativeHypeTrap(volumeSeries, priceSeries, spikeThreshold = 3) {
+  if (!volumeSeries.length || !priceSeries.length) return { trapped: false, spikeIdx: null }
+  const medianVol = [...volumeSeries].sort((a,b) => a-b)[Math.floor(volumeSeries.length/2)]
+  const traps = []
+  const n = Math.min(volumeSeries.length, priceSeries.length)
+  for (let i = 1; i < n; i++) {
+    const isSpike  = medianVol > 0 && volumeSeries[i] > spikeThreshold * medianVol
+    const priceDown = priceSeries[i] < priceSeries[i-1]
+    if (isSpike && priceDown) traps.push({ idx: i, volumeRatio: volumeSeries[i] / medianVol })
+  }
+  return {
+    trapped: traps.length > 0,
+    traps,
+    latestTrap: traps[traps.length - 1] ?? null,
+  }
+}
+
+// ── Favorite-Longshot Bias ────────────────────────────────────────
+// Compare market-implied probability to naive (uniform) frequency.
+// Returns bias per outcome: positive = longshot bias (market underestimates favorites)
+// Ref: Thaler & Ziemba (1988); NCM Ch.22
+export function favoriteLongshotBias(marketProbabilities) {
+  if (!marketProbabilities?.length) return []
+  const n = marketProbabilities.length
+  const naiveProb = 1 / n  // uniform historical frequency baseline
+  return marketProbabilities.map((p, i) => ({
+    outcomeIdx: i,
+    marketProb: p,
+    naiveProb,
+    // bias > 0: market overprices longshots (underdog) → favorite-longshot bias
+    bias: naiveProb - p,
+    // calibration error: market prob vs historical freq
+    calibrationError: p - naiveProb,
+  }))
+}

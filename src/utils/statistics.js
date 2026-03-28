@@ -173,3 +173,43 @@ export function bootstrap(arr, n = 500, statFn = mean) {
   }
   return results
 }
+
+// ── Rank normalisation ────────────────────────────────────────────
+// Returns ranks as fractions ∈ (0,1] — ties get average rank
+export function rankNormalize(arr) {
+  if (!arr.length) return []
+  const sorted = [...arr].map((v, i) => ({ v, i })).sort((a, b) => a.v - b.v)
+  const ranks = new Array(arr.length)
+  sorted.forEach(({ i }, r) => { ranks[i] = (r + 1) / arr.length })
+  return ranks
+}
+
+// ── Cross-Correlation Function (CCF) ─────────────────────────────
+// Returns [{ lag, r }] where r = Pearson(A[t], B[t+lag])
+// Positive lag: B leads A; negative lag: A leads B
+export function ccf(seriesA, seriesB, lags = [1, 3, 7]) {
+  return lags.map(lag => {
+    const absLag = Math.abs(lag)
+    const n = Math.min(seriesA.length, seriesB.length) - absLag
+    if (n < 2) return { lag, r: 0 }
+    const a = lag >= 0 ? seriesA.slice(0, n) : seriesA.slice(absLag, n + absLag)
+    const b = lag >= 0 ? seriesB.slice(absLag, n + absLag) : seriesB.slice(0, n)
+    return { lag, r: pearson(a, b) }
+  })
+}
+
+// ── GARCH(1,1) volatility model ───────────────────────────────────
+// h_t = ω + α·ε²_{t-1} + β·h_{t-1}
+// Returns { volatilities[], longRunVar, halfLife }
+export function garch11(returns, omega = 0.00001, alpha = 0.1, beta = 0.85) {
+  if (returns.length < 3) return { volatilities: [], longRunVar: null, halfLife: null }
+  const h = []
+  h[0] = variance(returns) || 0.0001
+  for (let t = 1; t < returns.length; t++) {
+    const eps2 = returns[t - 1] ** 2
+    h[t] = omega + alpha * eps2 + beta * h[t - 1]
+  }
+  const longRunVar = omega / (1 - alpha - beta)
+  const halfLife   = alpha + beta < 1 ? -Math.log(2) / Math.log(alpha + beta) : null
+  return { volatilities: h.map(v => Math.sqrt(v)), longRunVar: Math.sqrt(longRunVar), halfLife }
+}

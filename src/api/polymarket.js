@@ -180,3 +180,37 @@ export async function fetchEventHistories(gammaEvent) {
     ),
   }
 }
+
+// ── Fetch order book for primary market tokens (OBI, micro-price) ──
+// Attaches .orderBook = { bestBid, bestAsk, mid, micro, imbalance } per market
+export async function fetchEventOrderBooks(gammaEvent) {
+  if (gammaEvent.error) return gammaEvent
+  const updated = await Promise.allSettled(
+    gammaEvent.markets.map(async m => {
+      const tokenId = m.clobTokenIds?.[0]  // Yes-outcome token
+      if (!tokenId) return { ...m, orderBook: null }
+      try {
+        const data = await fetchJSON(`${CLOB_BASE}/book?token_id=${encodeURIComponent(tokenId)}`)
+        const bestBid = parseFloat(data.bids?.[0]?.price ?? 0)
+        const bestAsk = parseFloat(data.asks?.[0]?.price ?? 1)
+        const bidVol  = parseFloat(data.bids?.[0]?.size  ?? 0)
+        const askVol  = parseFloat(data.asks?.[0]?.size  ?? 0)
+        const denom   = bidVol + askVol
+        const mid     = (bestBid + bestAsk) / 2
+        const micro   = denom > 0 ? (bidVol * bestAsk + askVol * bestBid) / denom : mid
+        const imbalance = denom > 0 ? (bidVol - askVol) / denom : 0
+        console.log(`[PM] OB "${m.question?.slice(0,30)}": bid=${bestBid.toFixed(3)} ask=${bestAsk.toFixed(3)} OBI=${imbalance.toFixed(3)}`)
+        return { ...m, orderBook: { bestBid, bestAsk, bidVol, askVol, mid, micro, imbalance } }
+      } catch (err) {
+        console.warn(`[PM] Order book failed for ${m.id}:`, err)
+        return { ...m, orderBook: null }
+      }
+    })
+  )
+  return {
+    ...gammaEvent,
+    markets: updated.map((r, i) =>
+      r.status === 'fulfilled' ? r.value : { ...gammaEvent.markets[i], orderBook: null }
+    ),
+  }
+}
