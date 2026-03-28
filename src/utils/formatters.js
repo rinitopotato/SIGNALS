@@ -13,7 +13,7 @@ export function toJSTShort(unixTs) {
   return new Date(unixTs * 1000).toLocaleString('ja-JP', {
     timeZone: 'Asia/Tokyo',
     month: '2-digit', day: '2-digit',
-    hour: '2-digit', minute: '2-digit',
+    hour: '2-digit', minute: '2-digit', second: '2-digit',
   })
 }
 

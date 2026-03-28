@@ -3,35 +3,40 @@ import PriceLineChart from '../components/charts/PriceLineChart.jsx'
 import HeatmapGrid from '../components/charts/HeatmapGrid.jsx'
 import TradeFeed from '../components/feed/TradeFeed.jsx'
 import MetricBadge from '../components/cards/MetricBadge.jsx'
+import MarketPricePanel from '../components/cards/MarketPricePanel.jsx'
 import { WALLETS } from '../constants/wallets.js'
 import { SIGNALS_MARKETS } from '../constants/markets.js'
-import { formatPct, formatNum, toJST } from '../utils/formatters.js'
+import { formatPct, formatNum } from '../utils/formatters.js'
 
 export default function OverviewTab({ trades, snapshots, metrics }) {
-  const { siRaw, signal, bojSeries, bojPrices, bEstimate, bRegimeLabel, cg, wfa, les, kStar } = metrics ?? {}
+  const { siRaw, signal, bojSeries, bEstimate, bRegimeLabel, cg, wfa, les, kStar } = metrics ?? {}
+
+  const bojMarket = SIGNALS_MARKETS[0]
 
   // BOJ price chart data
-  const bojMarket = SIGNALS_MARKETS[0]
   const bojChartData = (bojSeries ?? []).map(s => {
     const row = { timestamp: s.timestamp }
-    bojMarket.outcomeLabels.forEach((lbl, i) => {
-      row[`o${i}`] = s.prices?.[i] ?? 0
-    })
+    bojMarket.outcomeLabels.forEach((_, i) => { row[`o${i}`] = s.prices?.[i] ?? 0 })
     return row
   })
-
   const bojLines = bojMarket.outcomeLabels.map((lbl, i) => ({
-    key: `o${i}`,
-    label: lbl,
-    color: bojMarket.colors[i],
+    key: `o${i}`, label: lbl, color: bojMarket.colors[i],
   }))
 
-  // Participation heatmap: traders × markets, cell = trade count
+  // Current BOJ prices
+  const currentPrices = bojSeries?.length
+    ? bojSeries[bojSeries.length - 1].prices ?? []
+    : bojMarket.outcomeLabels.map(() => 1 / bojMarket.outcomeLabels.length)
+  const prevPrices = bojSeries?.length > 1
+    ? bojSeries[bojSeries.length - 2].prices ?? []
+    : currentPrices
+  const lastBojTs = bojSeries?.length ? bojSeries[bojSeries.length - 1].timestamp : null
+
+  // Participation heatmap
   const heatmapMatrix = WALLETS.map(w =>
     SIGNALS_MARKETS.map(m =>
       (trades ?? []).filter(t =>
-        t.trader === w.address.toLowerCase() &&
-        t.market === m.address.toLowerCase()
+        t.trader === w.address.toLowerCase() && t.market === m.address.toLowerCase()
       ).length
     )
   )
@@ -41,9 +46,8 @@ export default function OverviewTab({ trades, snapshots, metrics }) {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
 
-      {/* Row 1: Gauge + BOJ chart */}
-      <div className="panel-grid panel-grid-2">
-        {/* SI Gauge */}
+      {/* Row 1: SI Gauge + BOJ live price panel */}
+      <div className="overview-row-1">
         <div className="card">
           <div className="card-title">BOJ Signal Index (SI_raw)</div>
           <div style={{ display: 'flex', justifyContent: 'center' }}>
@@ -65,19 +69,28 @@ export default function OverviewTab({ trades, snapshots, metrics }) {
           </div>
         </div>
 
-        {/* BOJ price history */}
-        <PriceLineChart
-          data={bojChartData}
-          lines={bojLines}
-          title="日銀金利 — Outcome Probability History"
-          height={220}
+        <MarketPricePanel
+          market={bojMarket}
+          prices={currentPrices}
+          prevPrices={prevPrices}
+          lastTs={lastBojTs}
         />
       </div>
 
-      {/* Row 2: Participation heatmap + Live trade feed */}
-      <div className="panel-grid panel-grid-2">
+      {/* Row 2: BOJ price chart full width */}
+      <div className="card">
+        <div className="card-title">日銀金利 — Outcome Probability History</div>
+        <PriceLineChart data={bojChartData} lines={bojLines} height={260} />
+      </div>
+
+      {/* Row 3: Trade feed + Heatmap */}
+      <div style={{ display: 'grid', gridTemplateColumns: '3fr 2fr', gap: 16 }}>
         <div className="card">
-          <div className="card-title">Participation Heatmap (trades per trader × market)</div>
+          <div className="card-title">Live Trade Feed</div>
+          <TradeFeed trades={trades ?? []} maxRows={30} />
+        </div>
+        <div className="card">
+          <div className="card-title">Participation Heatmap</div>
           <HeatmapGrid
             matrix={heatmapMatrix}
             rowLabels={WALLETS.map(w => w.name)}
@@ -85,15 +98,11 @@ export default function OverviewTab({ trades, snapshots, metrics }) {
             maxColor="#6c8fff"
           />
         </div>
-        <div className="card">
-          <div className="card-title">Live Trade Feed</div>
-          <TradeFeed trades={trades ?? []} maxRows={25} />
-        </div>
       </div>
 
-      {/* Row 3: Key KPIs */}
+      {/* KPI Summary */}
       <div className="card">
-        <div className="card-title">Monthly KPI Summary</div>
+        <div className="card-title">Key Performance Indicators</div>
         <div className="metric-grid">
           <MetricBadge id="IT"  value={metrics?.compositeIndex?.slice(-1)[0] ?? null} fmt="signed" />
           <MetricBadge id="KS"  value={kStar ?? null} fmt="int" />

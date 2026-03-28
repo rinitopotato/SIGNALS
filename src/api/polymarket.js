@@ -15,7 +15,7 @@ export async function fetchGammaEvents(slugs) {
     }
     const events = Array.isArray(r.value) ? r.value : [r.value]
     const event = events[0] ?? {}
-    return normaliseGammaEvent(slug, event)
+    return normaliseGammaEvent(slugs[i], event)
   })
 }
 

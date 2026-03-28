@@ -1,6 +1,6 @@
+import { useState, useEffect } from 'react'
 import { staleSeverity, severityToColor } from '../../utils/stale.js'
 import { POLL_INTERVALS } from '../../constants/endpoints.js'
-import { nowJST } from '../../utils/formatters.js'
 
 function FeedPill({ name, lastFetchedAt, pollInterval }) {
   const sev   = staleSeverity(lastFetchedAt, pollInterval)
@@ -19,6 +19,19 @@ function FeedPill({ name, lastFetchedAt, pollInterval }) {
   )
 }
 
+function LiveClock() {
+  const [tick, setTick] = useState(Date.now())
+  useEffect(() => {
+    const id = setInterval(() => setTick(Date.now()), 1000)
+    return () => clearInterval(id)
+  }, [])
+  const timeStr = new Date(tick).toLocaleString('ja-JP', {
+    timeZone: 'Asia/Tokyo',
+    hour: '2-digit', minute: '2-digit', second: '2-digit',
+  }) + ' JST'
+  return <span>{timeStr}</span>
+}
+
 export default function StatusBar({ goldskyTs, polymarketTs, attentionTs }) {
   const feeds = [
     { name: 'SIGNALS',    lastFetchedAt: goldskyTs,    pollInterval: POLL_INTERVALS.goldsky },
@@ -30,7 +43,7 @@ export default function StatusBar({ goldskyTs, polymarketTs, attentionTs }) {
       <span className="brand">SIGNALS</span>
       {feeds.map(f => <FeedPill key={f.name} {...f} />)}
       <span style={{ marginLeft: 'auto', color: 'var(--fg2)', fontSize: 11 }}>
-        Fukuhara Seminar · Group 3 · {nowJST()}
+        Fukuhara Seminar · Group 3 · <LiveClock />
       </span>
     </div>
   )

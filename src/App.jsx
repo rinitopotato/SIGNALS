@@ -8,6 +8,7 @@ import PolymarketTab from './tabs/PolymarketTab.jsx'
 import SignalEngineeringTab from './tabs/SignalEngineeringTab.jsx'
 import NetworkTab from './tabs/NetworkTab.jsx'
 import PlayersTab from './tabs/PlayersTab.jsx'
+import AnalyticsTab from './tabs/AnalyticsTab.jsx'
 import useGoldsky from './hooks/useGoldsky.js'
 import usePolymarket from './hooks/usePolymarket.js'
 import useAttention from './hooks/useAttention.js'
@@ -20,6 +21,7 @@ const TABS = [
   { id: 'signal-eng', label: 'Signal Engineering' },
   { id: 'network',    label: 'Network + HC/SC' },
   { id: 'players',    label: 'Players' },
+  { id: 'analytics',  label: 'Analytics' },
 ]
 
 export default function App() {
@@ -81,6 +83,15 @@ export default function App() {
           <PlayersTab
             trades={goldsky.trades}
             humanCapital={metrics.humanCapital ?? []}
+          />
+        )
+      case 'analytics':
+        return (
+          <AnalyticsTab
+            metrics={metrics}
+            bojSeries={metrics.bojSeries ?? []}
+            humanCapital={metrics.humanCapital ?? []}
+            trades={goldsky.trades}
           />
         )
       default:

@@ -1,5 +1,4 @@
 import { useState } from 'react'
-import TraderCard from '../components/cards/TraderCard.jsx'
 import { WALLETS } from '../constants/wallets.js'
 import { SIGNALS_MARKET_MAP } from '../constants/markets.js'
 import { toJST, toJSTShort, formatNum, truncateAddress } from '../utils/formatters.js'
@@ -10,128 +9,156 @@ function TraderDetail({ trader, trades }) {
     .sort((a, b) => b.timestamp - a.timestamp)
 
   return (
-    <div style={{ marginTop: 12 }}>
-      <table className="data-table">
-        <thead>
-          <tr>
-            <th>Time (JST)</th>
-            <th>Market</th>
-            <th>Outcome</th>
-            <th>Amount</th>
-            <th>Type</th>
-            <th>Tx</th>
-          </tr>
-        </thead>
-        <tbody>
-          {myTrades.slice(0, 30).map((t, i) => {
-            const market   = SIGNALS_MARKET_MAP[t.market]
-            const outcome  = market?.outcomeLabels?.[t.outcomeIndex] ?? `#${t.outcomeIndex}`
-            const isBuy    = t.type === 'buy' || t.type === 'BUY'
-            return (
-              <tr key={t.id ?? i}>
-                <td>{toJSTShort(t.timestamp)}</td>
-                <td style={{ color: 'var(--fg2)' }}>{market?.name ?? t.market.slice(0, 8) + '…'}</td>
-                <td>{outcome}</td>
-                <td style={{ color: isBuy ? 'var(--green)' : 'var(--red)' }}>
-                  {isBuy ? '+' : '-'}{formatNum(t.amount, 3)}
-                </td>
-                <td style={{ color: 'var(--fg2)' }}>{t.type ?? '—'}</td>
-                <td>
-                  <span style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--fg2)' }}>
-                    {t.txHash ? t.txHash.slice(0, 8) + '…' : '—'}
-                  </span>
-                </td>
+    <tr>
+      <td colSpan={9} style={{ padding: '0 0 0 24px', background: 'var(--bg3)' }}>
+        <div style={{ padding: '12px 0' }}>
+          <table className="data-table" style={{ width: '100%' }}>
+            <thead>
+              <tr>
+                <th>Time (JST)</th>
+                <th>Market</th>
+                <th>Outcome</th>
+                <th>Amount</th>
+                <th>Type</th>
+                <th>Tx</th>
               </tr>
-            )
-          })}
-        </tbody>
-      </table>
-      {myTrades.length === 0 && (
-        <div style={{ color: 'var(--fg2)', fontSize: 12, padding: 12 }}>No trades recorded for this wallet.</div>
-      )}
-    </div>
+            </thead>
+            <tbody>
+              {myTrades.slice(0, 30).map((t, i) => {
+                const market  = SIGNALS_MARKET_MAP[t.market]
+                const outcome = market?.outcomeLabels?.[t.outcomeIndex] ?? `#${t.outcomeIndex}`
+                const isBuy   = t.type === 'buy' || t.type === 'BUY'
+                return (
+                  <tr key={t.id ?? i}>
+                    <td>{toJSTShort(t.timestamp)}</td>
+                    <td style={{ color: 'var(--fg2)' }}>{market?.name ?? t.market.slice(0, 8) + '…'}</td>
+                    <td>{outcome}</td>
+                    <td style={{ color: isBuy ? 'var(--green)' : 'var(--red)' }}>
+                      {isBuy ? '+' : '-'}{formatNum(t.amount, 3)}
+                    </td>
+                    <td style={{ color: 'var(--fg2)' }}>{t.type ?? '—'}</td>
+                    <td>
+                      <span style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--fg2)' }}>
+                        {t.txHash ? t.txHash.slice(0, 8) + '…' : '—'}
+                      </span>
+                    </td>
+                  </tr>
+                )
+              })}
+              {myTrades.length === 0 && (
+                <tr><td colSpan={6} style={{ color: 'var(--fg2)', padding: 12 }}>No trades recorded.</td></tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </td>
+    </tr>
   )
 }
 
+const SORT_KEYS = {
+  name:       w => w.name,
+  tradeCount: w => w.tradeCount ?? 0,
+  bs:         w => w.bs ?? 9999,
+  ic:         w => w.ic ?? -9999,
+  ias:        w => w.ias ?? -9999,
+  ns:         w => w.ns ?? 9999,
+}
+
 export default function PlayersTab({ trades = [], humanCapital = [] }) {
+  const [sortKey, setSortKey]   = useState('tradeCount')
+  const [sortDir, setSortDir]   = useState('desc')
   const [expanded, setExpanded] = useState(null)
 
   const hcMap = Object.fromEntries((humanCapital ?? []).map(hc => [hc.address, hc]))
 
+  function handleSort(key) {
+    if (sortKey === key) {
+      setSortDir(d => d === 'asc' ? 'desc' : 'asc')
+    } else {
+      setSortKey(key)
+      setSortDir(key === 'bs' || key === 'ns' ? 'asc' : 'desc')
+    }
+  }
+
+  const sortedWallets = [...WALLETS]
+    .map(w => ({ ...w, ...(hcMap[w.address] ?? {}) }))
+    .sort((a, b) => {
+      const fn = SORT_KEYS[sortKey] ?? (x => x.name)
+      const va = fn(a)
+      const vb = fn(b)
+      return sortDir === 'asc' ? (va > vb ? 1 : -1) : (va < vb ? 1 : -1)
+    })
+
+  function SortTh({ label, k }) {
+    const active = sortKey === k
+    return (
+      <th
+        className="sortable-th"
+        onClick={() => handleSort(k)}
+        style={{ color: active ? 'var(--accent)' : undefined }}
+      >
+        {label} {active ? (sortDir === 'asc' ? '▲' : '▼') : ''}
+      </th>
+    )
+  }
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-      {/* Player cards grid */}
-      <div className="panel-grid" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))' }}>
-        {WALLETS.map(w => {
-          const hc = hcMap[w.address] ?? { ...w, tradeCount: 0, bs: null, ic: null, sr: null, ias: null, ns: null }
-          return (
-            <div key={w.address}>
-              <TraderCard trader={hc} />
-              <button
-                onClick={() => setExpanded(expanded === w.address ? null : w.address)}
-                style={{
-                  width: '100%', marginTop: 4,
-                  background: 'var(--bg3)', border: '1px solid var(--border)',
-                  color: 'var(--fg2)', borderRadius: 4, padding: '4px 0', cursor: 'pointer', fontSize: 11,
-                }}
-              >
-                {expanded === w.address ? '▲ Hide trades' : '▼ Show trades'}
-              </button>
-            </div>
-          )
-        })}
-      </div>
-
-      {/* Expanded trade history */}
-      {expanded && (
-        <div className="card">
-          <div className="card-title">
-            Trade History — {WALLETS.find(w => w.address === expanded)?.name ?? expanded}
-            <span style={{ marginLeft: 8, fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--fg2)' }}>
-              {truncateAddress(expanded)}
-            </span>
-          </div>
-          <TraderDetail
-            trader={WALLETS.find(w => w.address === expanded)}
-            trades={trades}
-          />
-        </div>
-      )}
-
-      {/* Full 6-lens KPI table */}
       <div className="card">
-        <div className="card-title">Human Capital KPI Table — All Traders</div>
-        <table className="data-table">
+        <div className="card-title">Trader Performance — Click row to expand trade history</div>
+        <table className="data-table" style={{ width: '100%' }}>
           <thead>
             <tr>
-              <th>Trader</th>
+              <SortTh label="Trader"       k="name" />
               <th>Group</th>
-              <th>Trades</th>
-              <th>Brier Score</th>
-              <th>IC</th>
-              <th>IAS</th>
-              <th>Noise Sens.</th>
+              <th style={{ fontFamily: 'var(--mono)', fontSize: 10 }}>Address</th>
+              <SortTh label="Trades"       k="tradeCount" />
+              <SortTh label="Brier Score"  k="bs" />
+              <SortTh label="IC"           k="ic" />
+              <SortTh label="IAS"          k="ias" />
+              <SortTh label="Noise Sens."  k="ns" />
               <th>Last Trade (JST)</th>
             </tr>
           </thead>
           <tbody>
-            {WALLETS.map(w => {
-              const hc = hcMap[w.address] ?? {}
+            {sortedWallets.map(w => {
+              const isOpen = expanded === w.address
               return (
-                <tr key={w.address}>
-                  <td style={{ color: 'var(--accent)', fontWeight: 700 }}>{w.name}</td>
-                  <td style={{ color: 'var(--fg2)' }}>{w.group}</td>
-                  <td>{hc.tradeCount ?? 0}</td>
-                  <td style={{ color: hc.bs != null ? (hc.bs < 0.2 ? 'var(--green)' : hc.bs < 0.35 ? 'var(--amber)' : 'var(--red)') : 'var(--fg2)' }}>
-                    {hc.bs != null ? hc.bs.toFixed(3) : '—'}
-                  </td>
-                  <td style={{ color: hc.ic != null ? (hc.ic > 0 ? 'var(--green)' : 'var(--red)') : 'var(--fg2)' }}>
-                    {hc.ic != null ? hc.ic.toFixed(3) : '—'}
-                  </td>
-                  <td>{hc.ias != null ? `${(hc.ias*100).toFixed(1)}%` : '—'}</td>
-                  <td>{hc.ns != null ? hc.ns.toFixed(3) : '—'}</td>
-                  <td style={{ color: 'var(--fg2)' }}>{hc.lastTrade ? toJSTShort(hc.lastTrade) : '—'}</td>
-                </tr>
+                <>
+                  <tr
+                    key={w.address}
+                    onClick={() => setExpanded(isOpen ? null : w.address)}
+                    style={{ cursor: 'pointer' }}
+                  >
+                    <td style={{ color: 'var(--accent)', fontWeight: 700 }}>
+                      {isOpen ? '▼ ' : '▶ '}{w.name}
+                    </td>
+                    <td style={{ color: 'var(--fg2)' }}>{w.group}</td>
+                    <td style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--fg2)' }}>
+                      {truncateAddress(w.address)}
+                    </td>
+                    <td>{w.tradeCount ?? 0}</td>
+                    <td style={{ color: w.bs != null ? (w.bs < 0.2 ? 'var(--green)' : w.bs < 0.35 ? 'var(--amber)' : 'var(--red)') : 'var(--fg2)' }}>
+                      {w.bs != null ? w.bs.toFixed(3) : '—'}
+                    </td>
+                    <td style={{ color: w.ic != null ? (w.ic > 0 ? 'var(--green)' : 'var(--red)') : 'var(--fg2)' }}>
+                      {w.ic != null ? w.ic.toFixed(3) : '—'}
+                    </td>
+                    <td>{w.ias != null ? `${(w.ias * 100).toFixed(1)}%` : '—'}</td>
+                    <td style={{ color: w.ns != null ? (w.ns < 1 ? 'var(--green)' : 'var(--amber)') : 'var(--fg2)' }}>
+                      {w.ns != null ? w.ns.toFixed(3) : '—'}
+                    </td>
+                    <td style={{ color: 'var(--fg2)' }}>{w.lastTrade ? toJSTShort(w.lastTrade) : '—'}</td>
+                  </tr>
+                  {isOpen && (
+                    <TraderDetail
+                      key={`${w.address}-detail`}
+                      trader={w}
+                      trades={trades}
+                    />
+                  )}
+                </>
               )
             })}
           </tbody>

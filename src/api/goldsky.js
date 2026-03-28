@@ -137,6 +137,7 @@ const OUTCOME_TOKENS_QUERY = `
         priceSnapshots(orderBy: timestamp, orderDirection: desc, first: 100) {
           id
           price
+          unweightedPrice
           timestamp
         }
       }
@@ -207,7 +208,7 @@ function normaliseFromOutcomeTokens(markets) {
         out.push({
           market:       m.id.toLowerCase(),
           outcomeIndex:  Number(ot.outcomeIndex ?? 0),
-          price:         parseInt(snap.price ?? '0') / 1e18,
+          price:         parseInt(snap.unweightedPrice ?? snap.price ?? '0') / 1e18,
           timestamp:     Number(snap.timestamp),
         })
       }
