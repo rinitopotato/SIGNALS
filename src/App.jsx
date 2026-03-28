@@ -1,0 +1,104 @@
+import { useState } from 'react'
+import TabBar from './components/layout/TabBar.jsx'
+import StatusBar from './components/layout/StatusBar.jsx'
+import LoadingSpinner from './components/layout/LoadingSpinner.jsx'
+import OverviewTab from './tabs/OverviewTab.jsx'
+import SignalsTab from './tabs/SignalsTab.jsx'
+import PolymarketTab from './tabs/PolymarketTab.jsx'
+import SignalEngineeringTab from './tabs/SignalEngineeringTab.jsx'
+import NetworkTab from './tabs/NetworkTab.jsx'
+import PlayersTab from './tabs/PlayersTab.jsx'
+import useGoldsky from './hooks/useGoldsky.js'
+import usePolymarket from './hooks/usePolymarket.js'
+import useAttention from './hooks/useAttention.js'
+import useDerivedMetrics from './hooks/useDerivedMetrics.js'
+
+const TABS = [
+  { id: 'overview',   label: 'Overview' },
+  { id: 'signals',    label: 'SIGNALS (3 Markets)' },
+  { id: 'polymarket', label: 'Polymarket' },
+  { id: 'signal-eng', label: 'Signal Engineering' },
+  { id: 'network',    label: 'Network + HC/SC' },
+  { id: 'players',    label: 'Players' },
+]
+
+export default function App() {
+  const [activeTab, setActiveTab] = useState('overview')
+
+  const goldsky    = useGoldsky()
+  const polymarket = usePolymarket()
+  const attention  = useAttention()
+
+  const metrics = useDerivedMetrics({
+    trades:         goldsky.trades,
+    snapshots:      goldsky.snapshots,
+    pmEvents:       polymarket.events,
+    attentionProxy: attention.attentionProxy,
+  })
+
+  const isInitialLoading = goldsky.isLoading && !goldsky.trades.length
+
+  function renderTab() {
+    if (isInitialLoading) return <LoadingSpinner message="Fetching SIGNALS blockchain data…" />
+
+    switch (activeTab) {
+      case 'overview':
+        return (
+          <OverviewTab
+            trades={goldsky.trades}
+            snapshots={goldsky.snapshots}
+            metrics={metrics}
+          />
+        )
+      case 'signals':
+        return (
+          <SignalsTab
+            snapshots={goldsky.snapshots}
+          />
+        )
+      case 'polymarket':
+        return (
+          <PolymarketTab
+            events={polymarket.events}
+            isLoading={polymarket.isLoading}
+          />
+        )
+      case 'signal-eng':
+        return (
+          <SignalEngineeringTab
+            bojSeries={metrics.bojSeries ?? []}
+            metrics={metrics}
+          />
+        )
+      case 'network':
+        return (
+          <NetworkTab
+            metrics={metrics}
+          />
+        )
+      case 'players':
+        return (
+          <PlayersTab
+            trades={goldsky.trades}
+            humanCapital={metrics.humanCapital ?? []}
+          />
+        )
+      default:
+        return null
+    }
+  }
+
+  return (
+    <div className="app-shell">
+      <StatusBar
+        goldskyTs={goldsky.lastFetchedAt}
+        polymarketTs={polymarket.lastFetchedAt}
+        attentionTs={attention.lastFetchedAt}
+      />
+      <TabBar tabs={TABS} activeTab={activeTab} onTabChange={setActiveTab} />
+      <main className="app-main">
+        {renderTab()}
+      </main>
+    </div>
+  )
+}
