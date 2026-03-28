@@ -1,3 +1,6 @@
+import {
+  ComposedChart, Line, YAxis, XAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
+} from 'recharts'
 import SignalGauge from '../components/charts/SignalGauge.jsx'
 import PriceLineChart from '../components/charts/PriceLineChart.jsx'
 import HeatmapGrid from '../components/charts/HeatmapGrid.jsx'
@@ -7,6 +10,22 @@ import MarketPricePanel from '../components/cards/MarketPricePanel.jsx'
 import { WALLETS } from '../constants/wallets.js'
 import { SIGNALS_MARKETS, TREND_KEYWORD_GROUPS } from '../constants/markets.js'
 import { formatPct, formatNum } from '../utils/formatters.js'
+
+function TrendsTooltip({ active, payload, label }) {
+  if (!active || !payload?.length) return null
+  const mm = label?.slice(4, 6), dd = label?.slice(6, 8)
+  const dateStr = mm && dd ? `${mm}/${dd}` : label
+  return (
+    <div style={{ background: 'var(--bg3)', border: '1px solid var(--border)', borderRadius: 6, padding: '6px 10px' }}>
+      <div style={{ fontSize: 10, color: 'var(--fg2)', marginBottom: 3 }}>{dateStr}</div>
+      {payload.map((p, i) => (
+        <div key={i} style={{ color: p.color, fontSize: 11, fontFamily: 'var(--mono)' }}>
+          {p.name}: {typeof p.value === 'number' ? p.value.toFixed(1) : '—'}
+        </div>
+      ))}
+    </div>
+  )
+}
 
 // ── Google Trends card per market ─────────────────────────────────
 function TrendsMarketCard({ marketId, groupMeta, data }) {
@@ -22,77 +41,100 @@ function TrendsMarketCard({ marketId, groupMeta, data }) {
   const statusColor = s => s === 'Rising' ? 'var(--green)' : s === 'Falling' ? 'var(--red)' : 'var(--fg2)'
   const statusArrow = s => s === 'Rising' ? '↑' : s === 'Falling' ? '↓' : '→'
 
-  // Inline sparkline from wiki series
-  const wikiVals = data.wikiSeries?.map(p => p.views) ?? []
-  const maxW = Math.max(...wikiVals, 1)
-  const sparkW = 220, sparkH = 40
-  const sparkPts = wikiVals.length > 1
-    ? wikiVals.map((v, i) => `${(i / (wikiVals.length - 1)) * sparkW},${sparkH - (v / maxW) * (sparkH - 4) - 2}`).join(' ')
-    : null
+  const mergedDaily = data.mergedDaily ?? []
+  const keywordSeries = data.keywordSeries ?? []
 
   return (
-    <div className="card" style={{ border: `2px solid ${groupMeta.color}30`, flex: 1, minWidth: 220 }}>
-      <div style={{ fontSize: 11, fontWeight: 700, color: groupMeta.color, letterSpacing: '0.08em', marginBottom: 8 }}>
-        {groupMeta.label}
+    <div className="card" style={{ border: `2px solid ${groupMeta.color}30`, flex: 1, minWidth: 260 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+        <span style={{ fontSize: 11, fontWeight: 700, color: groupMeta.color, letterSpacing: '0.08em' }}>
+          {groupMeta.label}
+        </span>
+        <span style={{ fontSize: 10, color: 'var(--fg2)', fontStyle: 'italic' }}>
+          avg {data.avg ?? 0} · peak {data.peak ?? 0}
+        </span>
       </div>
 
       {/* Keyword status badges */}
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 4, marginBottom: 10 }}>
-        {data.keywordSeries?.map(k => (
-          <div key={k.keyword} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-            <span style={{
-              padding: '1px 8px', borderRadius: 4, fontSize: 10, fontWeight: 700,
-              background: k.status === 'Rising' ? 'rgba(52,211,153,0.15)' : k.status === 'Falling' ? 'rgba(248,113,113,0.15)' : 'var(--bg3)',
-              color: statusColor(k.status),
-            }}>
-              {statusArrow(k.status)} {k.status}
-            </span>
-            <span style={{ fontSize: 11, color: 'var(--fg2)' }}>{k.keyword}</span>
-          </div>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginBottom: 10 }}>
+        {keywordSeries.map(k => (
+          <span key={k.keyword} style={{
+            padding: '1px 8px', borderRadius: 4, fontSize: 10, fontWeight: 700,
+            background: k.status === 'Rising' ? 'rgba(52,211,153,0.15)' : k.status === 'Falling' ? 'rgba(248,113,113,0.15)' : 'var(--bg3)',
+            color: statusColor(k.status),
+            border: `1px solid ${k.status === 'Rising' ? 'rgba(52,211,153,0.3)' : k.status === 'Falling' ? 'rgba(248,113,113,0.3)' : 'var(--border)'}`,
+          }}>
+            {statusArrow(k.status)} {k.keyword}
+          </span>
         ))}
       </div>
 
-      {/* Avg + Peak stats from keyword series */}
-      {data.keywordSeries?.map(k => {
-        const vals = k.values ?? []
-        const avg  = vals.length ? Math.round(vals.reduce((a, b) => a + b, 0) / vals.length) : 0
-        const peak = vals.length ? Math.round(Math.max(...vals)) : 0
-        return (
-          <div key={k.keyword} style={{
-            background: 'var(--bg3)', borderRadius: 6, padding: '6px 10px', marginBottom: 6,
-            display: 'flex', justifyContent: 'space-between', alignItems: 'baseline',
-          }}>
-            <span style={{ fontSize: 11, color: 'var(--fg2)', maxWidth: 150, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-              {k.keyword}
-            </span>
-            <span style={{ fontFamily: 'var(--mono)', fontSize: 14, fontWeight: 700, color: groupMeta.color }}>
-              {avg}
-            </span>
-            <span style={{ fontSize: 10, color: 'var(--fg2)' }}>avg · peak {peak}</span>
-          </div>
-        )
-      })}
-
-      {/* Wikipedia sparkline */}
-      {sparkPts && (
-        <div style={{ marginTop: 8 }}>
-          <div style={{ fontSize: 10, color: 'var(--fg2)', marginBottom: 4 }}>Wikipedia attention (last 30d)</div>
-          <svg width="100%" viewBox={`0 0 ${sparkW} ${sparkH}`} style={{ maxWidth: sparkW }}>
-            <polyline
-              points={sparkPts}
-              fill="none"
-              stroke={groupMeta.color}
-              strokeWidth={1.5}
-              strokeLinecap="round"
-              strokeLinejoin="round"
+      {/* Recharts ComposedChart — trends (right) + wiki normalized (right) */}
+      {mergedDaily.length > 1 ? (
+        <ResponsiveContainer width="100%" height={140}>
+          <ComposedChart data={mergedDaily} margin={{ top: 4, right: 4, bottom: 0, left: 0 }}>
+            <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
+            <XAxis
+              dataKey="displayDate"
+              tick={{ fontSize: 9, fill: 'var(--fg2)' }}
+              minTickGap={30}
             />
-          </svg>
+            {/* Left Y-axis: trends 0–100 */}
+            <YAxis
+              yAxisId="trends"
+              orientation="left"
+              domain={[0, 100]}
+              tick={{ fontSize: 9, fill: 'var(--fg2)' }}
+              width={28}
+              tickFormatter={v => v}
+            />
+            {/* Right Y-axis: wiki normalized 0–100 */}
+            <YAxis
+              yAxisId="wiki"
+              orientation="right"
+              domain={[0, 100]}
+              tick={{ fontSize: 9, fill: 'var(--fg2)' }}
+              width={28}
+              tickFormatter={v => `${v}%`}
+            />
+            <Tooltip content={<TrendsTooltip />} />
+            <Legend wrapperStyle={{ fontSize: 9 }} />
+            {keywordSeries.map((k, i) => (
+              <Line
+                key={k.keyword}
+                yAxisId="trends"
+                type="monotone"
+                dataKey={k.keyword}
+                name={k.keyword}
+                stroke={i === 0 ? groupMeta.color : `${groupMeta.color}88`}
+                strokeWidth={i === 0 ? 1.5 : 1}
+                dot={false}
+                isAnimationActive={false}
+                connectNulls
+              />
+            ))}
+            <Line
+              yAxisId="wiki"
+              type="monotone"
+              dataKey="wikiNorm"
+              name="Wikipedia"
+              stroke="#888"
+              strokeWidth={1}
+              strokeDasharray="4 2"
+              dot={false}
+              isAnimationActive={false}
+              connectNulls
+            />
+          </ComposedChart>
+        </ResponsiveContainer>
+      ) : (
+        <div style={{ fontSize: 11, color: 'var(--fg2)', fontStyle: 'italic', height: 60, display: 'flex', alignItems: 'center' }}>
+          No chart data yet
         </div>
       )}
 
-      {/* Synthetic trends note */}
-      <div style={{ fontSize: 9, color: 'var(--fg2)', marginTop: 6, fontStyle: 'italic' }}>
-        Trend data is synthetic (Google Trends API unavailable) · Wikipedia data is real
+      <div style={{ fontSize: 9, color: 'var(--fg2)', marginTop: 4, fontStyle: 'italic' }}>
+        Trend data synthetic · Wikipedia real · left axis = search index (0–100) · right = wiki norm
       </div>
     </div>
   )

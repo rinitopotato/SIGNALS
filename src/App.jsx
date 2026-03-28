@@ -89,6 +89,7 @@ export default function App() {
             bojSeries={metrics.bojSeries ?? []}
             metrics={metrics}
             snapshots={goldsky.snapshots}
+            perMarketData={attention.perMarketData}
           />
         )
       case 'network':

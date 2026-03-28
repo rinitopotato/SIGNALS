@@ -60,9 +60,29 @@ function EventPanel({ event, pmMeta }) {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+      {/* CLOB price history chart — shown first */}
+      {chartData.length > 1 && chartLines.length > 0 ? (
+        <PriceLineChart
+          data={chartData}
+          lines={chartLines}
+          title={`${event.title ?? pmMeta.label} — CLOB Price History`}
+          height={200}
+        />
+      ) : (
+        <div className="card">
+          <div className="card-title">{event.title ?? pmMeta.label} — CLOB Price History</div>
+          <div style={{ color: 'var(--fg2)', fontSize: 12, fontStyle: 'italic' }}>
+            {chartData.length <= 1
+              ? 'CLOB history loading — may take a moment'
+              : 'No token history available'}
+          </div>
+        </div>
+      )}
+
+      {/* Current probabilities */}
       <div className="card">
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 10 }}>
-          <span style={{ fontWeight: 700, fontSize: 13 }}>{event.title ?? pmMeta.label}</span>
+          <span style={{ fontWeight: 700, fontSize: 13 }}>Current Probabilities</span>
           {primaryMarket?.volume != null && (
             <span className="badge badge-grey">Vol ${formatCompact(primaryMarket.volume)}</span>
           )}
@@ -74,15 +94,6 @@ function EventPanel({ event, pmMeta }) {
           </div>
         )}
       </div>
-
-      {chartData.length > 0 && chartLines.length > 0 && (
-        <PriceLineChart
-          data={chartData}
-          lines={chartLines}
-          title="CLOB Price History (per outcome token)"
-          height={180}
-        />
-      )}
 
       {markets.length > 1 && (
         <div className="card">
