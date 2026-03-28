@@ -1,218 +1,116 @@
 import { postGraphQL } from './utils.js'
 import { GOLDSKY_URL } from '../constants/endpoints.js'
 
-// ── Schema introspection (run once to discover field names) ────────
-const INTROSPECT_QUERY = `
-  query {
-    __schema {
-      queryType { fields { name } }
-    }
-  }
-`
-
-export async function introspectSchema() {
-  return postGraphQL(GOLDSKY_URL, INTROSPECT_QUERY)
-}
-
-// ── Trader activity ────────────────────────────────────────────────
-// Fetches the most recent 500 trades across all tracked wallets.
-// Field names are based on common SIGNALS subgraph conventions;
-// adjust if the live schema differs.
-const TRADES_QUERY = `
-  query TraderActivity($wallets: [String!]!, $first: Int!) {
-    trades(
-      where: { trader_in: $wallets }
-      orderBy: timestamp
-      orderDirection: desc
-      first: $first
-    ) {
-      id
-      trader
-      market
-      outcomeIndex
-      collateralAmount
-      timestamp
-      transactionHash
-      type
-    }
-  }
-`
-
-// Fallback query using alternative field names sometimes seen in SIGNALS subgraphs
-const TRADES_QUERY_ALT = `
-  query TraderActivityAlt($wallets: [String!]!, $first: Int!) {
-    trades(
-      where: { user_in: $wallets }
-      orderBy: timestamp
-      orderDirection: desc
-      first: $first
-    ) {
-      id
-      user
-      market
-      outcomeIndex
-      amount
-      timestamp
-      transactionHash
-    }
-  }
-`
-
-export async function fetchTraderActivity(walletAddresses, limit = 500) {
-  try {
-    const data = await postGraphQL(GOLDSKY_URL, TRADES_QUERY, {
-      wallets: walletAddresses,
-      first: limit,
-    })
-    if (data.trades) return normaliseTrades(data.trades)
-
-    // try alternate field names
-    const data2 = await postGraphQL(GOLDSKY_URL, TRADES_QUERY_ALT, {
-      wallets: walletAddresses,
-      first: limit,
-    })
-    if (data2.trades) return normaliseTrades(data2.trades, true)
-    return []
-  } catch (err) {
-    console.warn('fetchTraderActivity error:', err)
-    return []
-  }
-}
-
-function normaliseTrades(raw, altSchema = false) {
-  return raw.map(t => ({
-    id:             t.id,
-    trader:        (t.trader ?? t.user ?? '').toLowerCase(),
-    market:        (t.market ?? '').toLowerCase(),
-    outcomeIndex:   Number(t.outcomeIndex ?? 0),
-    amount:         parseInt(t.collateralAmount ?? t.amount ?? '0') / 1e18,
-    timestamp:      Number(t.timestamp),
-    txHash:         t.transactionHash ?? '',
-    type:           t.type ?? 'buy',
-  }))
-}
-
-// ── Market snapshots ───────────────────────────────────────────────
-// Fetches price snapshots for outcome tokens in the given markets.
-const SNAPSHOTS_QUERY = `
-  query MarketSnapshots($markets: [String!]!, $first: Int!) {
-    priceSnapshots(
-      where: { market_in: $markets }
-      orderBy: timestamp
-      orderDirection: desc
-      first: $first
-    ) {
-      id
-      market
-      outcomeIndex
-      price
-      timestamp
-    }
-  }
-`
-
-const SNAPSHOTS_QUERY_ALT = `
-  query MarketSnapshotsAlt($markets: [String!]!, $first: Int!) {
-    marketSnapshots(
-      where: { market_in: $markets }
-      orderBy: timestamp
-      orderDirection: desc
-      first: $first
-    ) {
-      id
-      market
-      prices
-      timestamp
-    }
-  }
-`
-
-const OUTCOME_TOKENS_QUERY = `
-  query OutcomeTokens($markets: [String!]!) {
-    markets(where: { id_in: $markets }) {
-      id
-      outcomeTokens {
-        id
-        outcomeIndex
-        priceSnapshots(orderBy: timestamp, orderDirection: desc, first: 100) {
+// ── Per-trader query (notebook-confirmed schema) ───────────────────
+// Uses singular `trader(id: ...)` — the plural `trades(where:...)` entity doesn't exist.
+const TRADER_QUERY = `
+  query TraderTrades($id: String!, $first: Int!) {
+    trader(id: $id) {
+      trades(
+        first: $first
+        orderBy: timestamp
+        orderDirection: desc
+      ) {
+        type
+        amount
+        timestamp
+        market {
           id
-          price
-          unweightedPrice
-          timestamp
+          title
         }
       }
     }
   }
 `
 
-export async function fetchMarketSnapshots(marketAddresses, limit = 300) {
-  try {
-    // Try primary snapshot entity
-    const data = await postGraphQL(GOLDSKY_URL, SNAPSHOTS_QUERY, {
-      markets: marketAddresses,
-      first: limit,
-    })
-    if (data.priceSnapshots?.length) return normaliseSnapshots(data.priceSnapshots)
-
-    // Try alternate entity name
-    const data2 = await postGraphQL(GOLDSKY_URL, SNAPSHOTS_QUERY_ALT, {
-      markets: marketAddresses,
-      first: limit,
-    })
-    if (data2.marketSnapshots?.length) return normaliseSnapshotsAlt(data2.marketSnapshots)
-
-    // Try nested outcomeTokens structure
-    const data3 = await postGraphQL(GOLDSKY_URL, OUTCOME_TOKENS_QUERY, {
-      markets: marketAddresses,
-    })
-    if (data3.markets?.length) return normaliseFromOutcomeTokens(data3.markets)
-
-    return []
-  } catch (err) {
-    console.warn('fetchMarketSnapshots error:', err)
-    return []
-  }
-}
-
-// Returns: [{ market, outcomeIndex, price, timestamp }]
-function normaliseSnapshots(raw) {
-  return raw.map(s => ({
-    market:       (s.market ?? '').toLowerCase(),
-    outcomeIndex:  Number(s.outcomeIndex ?? 0),
-    price:         parseInt(s.price ?? '0') / 1e18,
-    timestamp:     Number(s.timestamp),
-  }))
-}
-
-function normaliseSnapshotsAlt(raw) {
-  const out = []
-  for (const snap of raw) {
-    const prices = Array.isArray(snap.prices) ? snap.prices : JSON.parse(snap.prices ?? '[]')
-    prices.forEach((p, i) => {
-      out.push({
-        market:       (snap.market ?? '').toLowerCase(),
-        outcomeIndex:  i,
-        price:         parseInt(p) / 1e18,
-        timestamp:     Number(snap.timestamp),
-      })
-    })
-  }
-  return out
-}
-
-function normaliseFromOutcomeTokens(markets) {
-  const out = []
-  for (const m of markets) {
-    for (const ot of (m.outcomeTokens ?? [])) {
-      for (const snap of (ot.priceSnapshots ?? [])) {
-        out.push({
-          market:       m.id.toLowerCase(),
-          outcomeIndex:  Number(ot.outcomeIndex ?? 0),
-          price:         parseInt(snap.unweightedPrice ?? snap.price ?? '0') / 1e18,
-          timestamp:     Number(snap.timestamp),
-        })
+// ── Per-market snapshot query (notebook-confirmed schema) ──────────
+// Uses singular `market(id: ...)` — the plural `markets(where:...)` entity doesn't exist.
+// priceSnapshots live under outcomeTokens, field is `unweightedPrice` (not `price`).
+const MARKET_QUERY = `
+  query MarketSnapshots($id: String!, $first: Int!) {
+    market(id: $id) {
+      title
+      outcomeTokens(first: 10) {
+        label
+        priceSnapshots(
+          first: $first
+          orderBy: timestamp
+          orderDirection: desc
+        ) {
+          timestamp
+          unweightedPrice
+        }
       }
     }
   }
-  return out
+`
+
+// ── Trader activity ────────────────────────────────────────────────
+// Queries each wallet individually and merges results.
+export async function fetchTraderActivity(walletAddresses, limit = 100) {
+  const results = await Promise.allSettled(
+    walletAddresses.map(addr =>
+      postGraphQL(GOLDSKY_URL, TRADER_QUERY, { id: addr.toLowerCase(), first: limit })
+    )
+  )
+
+  const trades = []
+  results.forEach((r, i) => {
+    if (r.status === 'rejected') {
+      console.warn(`fetchTraderActivity failed for ${walletAddresses[i]}:`, r.reason)
+      return
+    }
+    const raw = r.value?.trader?.trades
+    if (!Array.isArray(raw)) return
+    const addr = walletAddresses[i].toLowerCase()
+    raw.forEach((t, j) => {
+      trades.push({
+        id:           `${addr}-${j}`,
+        trader:       addr,
+        market:       (t.market?.id ?? '').toLowerCase(),
+        marketTitle:  t.market?.title ?? '',
+        outcomeIndex: 0,  // not returned by subgraph — use 0 as default
+        amount:       parseFloat(t.amount ?? '0') / 1e18,
+        timestamp:    Number(t.timestamp),
+        type:         (t.type ?? 'Buy').toLowerCase(),
+        txHash:       '',
+      })
+    })
+  })
+
+  return trades
+}
+
+// ── Market snapshots ───────────────────────────────────────────────
+// Queries each market individually and merges into flat snapshot array.
+export async function fetchMarketSnapshots(marketAddresses, limit = 100) {
+  const results = await Promise.allSettled(
+    marketAddresses.map(addr =>
+      postGraphQL(GOLDSKY_URL, MARKET_QUERY, { id: addr.toLowerCase(), first: limit })
+    )
+  )
+
+  const snapshots = []
+  results.forEach((r, i) => {
+    if (r.status === 'rejected') {
+      console.warn(`fetchMarketSnapshots failed for ${marketAddresses[i]}:`, r.reason)
+      return
+    }
+    const market = r.value?.market
+    if (!market) return
+    const marketAddr = marketAddresses[i].toLowerCase()
+    ;(market.outcomeTokens ?? []).forEach((ot, outcomeIdx) => {
+      ;(ot.priceSnapshots ?? []).forEach(snap => {
+        snapshots.push({
+          market:       marketAddr,
+          outcomeIndex: outcomeIdx,
+          label:        ot.label ?? `Outcome ${outcomeIdx}`,
+          price:        parseFloat(snap.unweightedPrice ?? '0') / 1e18,
+          timestamp:    Number(snap.timestamp),
+        })
+      })
+    })
+  })
+
+  return snapshots
 }
