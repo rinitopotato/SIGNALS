@@ -24,6 +24,8 @@ const TABS = [
 
 export default function App() {
   const [activeTab, setActiveTab] = useState('overview')
+  const [selectedMarketId, setSelectedMarketId] = useState('boj')
+  const [selectedEventIdx, setSelectedEventIdx] = useState(0)
 
   const goldsky    = useGoldsky()
   const polymarket = usePolymarket()
@@ -61,6 +63,8 @@ export default function App() {
           <PolymarketTab
             events={polymarket.events}
             isLoading={polymarket.isLoading}
+            selectedEventIdx={selectedEventIdx}
+            onEventChange={setSelectedEventIdx}
           />
         )
       case 'signal-eng':
@@ -68,12 +72,17 @@ export default function App() {
           <SignalEngineeringTab
             bojSeries={metrics.bojSeries ?? []}
             metrics={metrics}
+            selectedMarketId={selectedMarketId}
+            onMarketChange={setSelectedMarketId}
           />
         )
       case 'network':
         return (
           <NetworkTab
             metrics={metrics}
+            trades={goldsky.trades}
+            selectedMarketId={selectedMarketId}
+            onMarketChange={setSelectedMarketId}
           />
         )
       case 'players':
@@ -81,6 +90,8 @@ export default function App() {
           <PlayersTab
             trades={goldsky.trades}
             humanCapital={metrics.humanCapital ?? []}
+            selectedMarketId={selectedMarketId}
+            onMarketChange={setSelectedMarketId}
           />
         )
       default:
