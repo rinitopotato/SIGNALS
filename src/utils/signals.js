@@ -229,3 +229,115 @@ export function favoriteLongshotBias(marketProbabilities) {
     calibrationError: p - naiveProb,
   }))
 }
+
+// ── Composite Signal Index (Sendai / Showa) ───────────────────────
+// Implements the Python build_signal_index formula:
+//   Z_trends = (x_t − μ) / σ
+//   trends_scaled = (Z − min) / (max − min)
+//   S_t = w1 * price_t + w2 * trends_scaled_t
+//   ma3d = rolling 3-day MA on S_t
+//   leadCorr = Pearson(trends_scaled[t-lag], price[t]) at lag=3
+//
+// @param {Array} priceSeries   [{date:"YYYYMMDD", price:number}]
+// @param {Array} trendsSeries  [{date:"YYYYMMDD", value:number}]  — 0–100 scale
+// @param {number} w1           Price weight (default 0.7)
+// @param {number} w2           Trends weight (default 0.3)
+// @param {number} maWindow     Rolling MA window in days (default 3 = 72-hour MA)
+// @param {string} marketId     'sendai' | 'showa' for market-specific alerts
+export function buildCompositeSignal(
+  priceSeries,
+  trendsSeries,
+  w1 = 0.7,
+  w2 = 0.3,
+  maWindow = 3,
+  marketId = null,
+) {
+  if (!priceSeries?.length || !trendsSeries?.length) {
+    return { aligned: [], interpretation: 'NEUTRAL', leadCorr: null, hasWeekendSpike: false, negativeHype: [] }
+  }
+
+  // 1. Inner join on date
+  const priceMap = Object.fromEntries(priceSeries.map(p => [p.date, p.price]))
+  const aligned = trendsSeries
+    .filter(t => priceMap[t.date] != null)
+    .map(t => ({ date: t.date, price: priceMap[t.date], trendsRaw: t.value }))
+
+  if (aligned.length < 2) {
+    return { aligned: [], interpretation: 'NEUTRAL', leadCorr: null, hasWeekendSpike: false, negativeHype: [] }
+  }
+
+  // 2. Z-score trends
+  const rawVals = aligned.map(p => p.trendsRaw)
+  const mu  = mean(rawVals)
+  const sig = stddev(rawVals) || 1
+  for (const p of aligned) p.trendsZ = (p.trendsRaw - mu) / sig
+
+  // 3. Scale trends to [0,1]: scaled = (Z − min) / (max − min)
+  const zVals = aligned.map(p => p.trendsZ)
+  const zMin  = Math.min(...zVals)
+  const zMax  = Math.max(...zVals)
+  const zRange = zMax - zMin || 1
+  for (const p of aligned) p.trendsScaled = (p.trendsZ - zMin) / zRange
+
+  // 4. Composite signal index
+  for (const p of aligned) p.signalIndex = w1 * p.price + w2 * p.trendsScaled
+
+  // 5. 72-hour (3-day) rolling MA on S_t
+  const siVals = aligned.map(p => p.signalIndex)
+  const maArr  = rollingMean(siVals, maWindow)
+  for (let i = 0; i < aligned.length; i++) aligned[i].ma3d = maArr[i]
+
+  // 6. Lead correlation: Pearson(trends_scaled[t-lag], price[t]) at lag=3
+  const lag = 3
+  let leadCorr = null
+  if (aligned.length > lag + 2) {
+    const laggedTrends = aligned.slice(0, aligned.length - lag).map(p => p.trendsScaled)
+    const futurePrice  = aligned.slice(lag).map(p => p.price)
+    leadCorr = pearson(laggedTrends, futurePrice)
+  }
+
+  // 7. Signal interpretation
+  const last = aligned[aligned.length - 1]
+  const lastZ = last.trendsZ
+  const priceDelta3d = aligned.length > 3
+    ? Math.abs(last.price - aligned[aligned.length - 4].price)
+    : 0.1
+  let interpretation = 'NEUTRAL'
+  if (leadCorr != null && leadCorr > 0.2 && lastZ > 1 && priceDelta3d < 0.02) {
+    interpretation = 'BUY'
+  } else if (leadCorr != null && leadCorr < -0.1 && lastZ < -1) {
+    interpretation = 'SELL'
+  }
+
+  // 8. Sendai-specific: detect Thu (4) or Fri (5) trend spikes
+  let hasWeekendSpike = false
+  let spikes = []
+  if (marketId === 'sendai') {
+    spikes = aligned.filter(p => {
+      const dow = new Date(p.date.replace(/(\d{4})(\d{2})(\d{2})/, '$1-$2-$3')).getDay()
+      return (dow === 4 || dow === 5) && p.trendsZ > 1.0
+    })
+    hasWeekendSpike = spikes.length > 0
+    if (hasWeekendSpike && priceDelta3d < 0.02) interpretation = 'BUY'
+  }
+
+  // 9. Showa-specific: Negative Hype — trend spike >2σ but price flat/opposite
+  let negativeHype = []
+  if (marketId === 'showa') {
+    negativeHype = aligned.filter((p, i) => {
+      const priceMoved = i > 0 && Math.abs(p.price - aligned[i - 1].price) > 0.01
+      return p.trendsZ > 2 && !priceMoved
+    })
+    if (negativeHype.length > 0) interpretation = 'CAUTION'
+  }
+
+  return {
+    aligned,
+    leadCorr,
+    interpretation,
+    hasWeekendSpike,
+    spikes,
+    negativeHype,
+    zStats: { mu, sig, zMin, zMax },
+  }
+}
