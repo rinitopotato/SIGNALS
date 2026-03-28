@@ -77,4 +77,31 @@ export const WIKI_ARTICLES = {
     '植田和男',
     '金融政策決定会合',
   ],
+  showa: [
+    '黒澤明',
+    'ゴジラ',
+    '宮崎駿',
+  ],
+}
+
+// Per-market keyword groups for Google Trends display
+export const TREND_KEYWORD_GROUPS = {
+  boj: {
+    label: 'BOJ RATE',
+    color: '#6c8fff',
+    keywords: ['日銀 金利', 'BOJ interest rate'],
+    wikiArticles: WIKI_ARTICLES.boj,
+  },
+  sendai: {
+    label: 'SENDAI TRAVEL',
+    color: '#34d399',
+    keywords: ['仙台 旅行', '牛たん 仙台'],
+    wikiArticles: WIKI_ARTICLES.sendai,
+  },
+  showa: {
+    label: 'SHOWA CONTENT',
+    color: '#a78bfa',
+    keywords: ['黒澤明', 'ゴジラ', '宮崎駿'],
+    wikiArticles: WIKI_ARTICLES.showa,
+  },
 }

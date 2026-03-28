@@ -5,10 +5,100 @@ import TradeFeed from '../components/feed/TradeFeed.jsx'
 import MetricBadge from '../components/cards/MetricBadge.jsx'
 import MarketPricePanel from '../components/cards/MarketPricePanel.jsx'
 import { WALLETS } from '../constants/wallets.js'
-import { SIGNALS_MARKETS } from '../constants/markets.js'
+import { SIGNALS_MARKETS, TREND_KEYWORD_GROUPS } from '../constants/markets.js'
 import { formatPct, formatNum } from '../utils/formatters.js'
 
-export default function OverviewTab({ trades, snapshots, metrics }) {
+// ── Google Trends card per market ─────────────────────────────────
+function TrendsMarketCard({ marketId, groupMeta, data }) {
+  if (!data) return (
+    <div className="card" style={{ border: `2px solid ${groupMeta.color}20` }}>
+      <div style={{ fontSize: 11, fontWeight: 700, color: groupMeta.color, letterSpacing: '0.08em', marginBottom: 8 }}>
+        {groupMeta.label}
+      </div>
+      <div style={{ fontSize: 11, color: 'var(--fg2)', fontStyle: 'italic' }}>Loading attention data…</div>
+    </div>
+  )
+
+  const statusColor = s => s === 'Rising' ? 'var(--green)' : s === 'Falling' ? 'var(--red)' : 'var(--fg2)'
+  const statusArrow = s => s === 'Rising' ? '↑' : s === 'Falling' ? '↓' : '→'
+
+  // Inline sparkline from wiki series
+  const wikiVals = data.wikiSeries?.map(p => p.views) ?? []
+  const maxW = Math.max(...wikiVals, 1)
+  const sparkW = 220, sparkH = 40
+  const sparkPts = wikiVals.length > 1
+    ? wikiVals.map((v, i) => `${(i / (wikiVals.length - 1)) * sparkW},${sparkH - (v / maxW) * (sparkH - 4) - 2}`).join(' ')
+    : null
+
+  return (
+    <div className="card" style={{ border: `2px solid ${groupMeta.color}30`, flex: 1, minWidth: 220 }}>
+      <div style={{ fontSize: 11, fontWeight: 700, color: groupMeta.color, letterSpacing: '0.08em', marginBottom: 8 }}>
+        {groupMeta.label}
+      </div>
+
+      {/* Keyword status badges */}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 4, marginBottom: 10 }}>
+        {data.keywordSeries?.map(k => (
+          <div key={k.keyword} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <span style={{
+              padding: '1px 8px', borderRadius: 4, fontSize: 10, fontWeight: 700,
+              background: k.status === 'Rising' ? 'rgba(52,211,153,0.15)' : k.status === 'Falling' ? 'rgba(248,113,113,0.15)' : 'var(--bg3)',
+              color: statusColor(k.status),
+            }}>
+              {statusArrow(k.status)} {k.status}
+            </span>
+            <span style={{ fontSize: 11, color: 'var(--fg2)' }}>{k.keyword}</span>
+          </div>
+        ))}
+      </div>
+
+      {/* Avg + Peak stats from keyword series */}
+      {data.keywordSeries?.map(k => {
+        const vals = k.values ?? []
+        const avg  = vals.length ? Math.round(vals.reduce((a, b) => a + b, 0) / vals.length) : 0
+        const peak = vals.length ? Math.round(Math.max(...vals)) : 0
+        return (
+          <div key={k.keyword} style={{
+            background: 'var(--bg3)', borderRadius: 6, padding: '6px 10px', marginBottom: 6,
+            display: 'flex', justifyContent: 'space-between', alignItems: 'baseline',
+          }}>
+            <span style={{ fontSize: 11, color: 'var(--fg2)', maxWidth: 150, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {k.keyword}
+            </span>
+            <span style={{ fontFamily: 'var(--mono)', fontSize: 14, fontWeight: 700, color: groupMeta.color }}>
+              {avg}
+            </span>
+            <span style={{ fontSize: 10, color: 'var(--fg2)' }}>avg · peak {peak}</span>
+          </div>
+        )
+      })}
+
+      {/* Wikipedia sparkline */}
+      {sparkPts && (
+        <div style={{ marginTop: 8 }}>
+          <div style={{ fontSize: 10, color: 'var(--fg2)', marginBottom: 4 }}>Wikipedia attention (last 30d)</div>
+          <svg width="100%" viewBox={`0 0 ${sparkW} ${sparkH}`} style={{ maxWidth: sparkW }}>
+            <polyline
+              points={sparkPts}
+              fill="none"
+              stroke={groupMeta.color}
+              strokeWidth={1.5}
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+          </svg>
+        </div>
+      )}
+
+      {/* Synthetic trends note */}
+      <div style={{ fontSize: 9, color: 'var(--fg2)', marginTop: 6, fontStyle: 'italic' }}>
+        Trend data is synthetic (Google Trends API unavailable) · Wikipedia data is real
+      </div>
+    </div>
+  )
+}
+
+export default function OverviewTab({ trades, snapshots, metrics, perMarketData = {} }) {
   const { siRaw, signal, bojSeries, bEstimate, bRegimeLabel, cg, wfa, les, kStar } = metrics ?? {}
 
   const bojMarket = SIGNALS_MARKETS[0]
@@ -97,6 +187,27 @@ export default function OverviewTab({ trades, snapshots, metrics }) {
             colLabels={SIGNALS_MARKETS.map(m => m.name)}
             maxColor="#6c8fff"
           />
+        </div>
+      </div>
+
+      {/* Google Trends per-market section */}
+      <div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 12 }}>
+          <span style={{ fontSize: 20 }}>🔍</span>
+          <span style={{ fontSize: 18, fontWeight: 700 }}>Google Trends</span>
+          <span style={{ padding: '2px 10px', borderRadius: 20, fontSize: 11, fontWeight: 700, background: 'var(--bg3)', color: 'var(--fg2)', border: '1px solid var(--border)' }}>
+            SEARCH INTEREST
+          </span>
+        </div>
+        <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap' }}>
+          {Object.entries(TREND_KEYWORD_GROUPS).map(([marketId, groupMeta]) => (
+            <TrendsMarketCard
+              key={marketId}
+              marketId={marketId}
+              groupMeta={groupMeta}
+              data={perMarketData[marketId]}
+            />
+          ))}
         </div>
       </div>
 

@@ -62,6 +62,7 @@ export default function App() {
             trades={goldsky.trades}
             snapshots={goldsky.snapshots}
             metrics={metrics}
+            perMarketData={attention.perMarketData}
           />
         )
       case 'signals':

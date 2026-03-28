@@ -13,7 +13,7 @@ import {
 import { lmsrPrices, backCalcQuantities, computeSIRaw, classifySignal } from '../utils/lmsr.js'
 import { formatNum, formatPct } from '../utils/formatters.js'
 import { bSensitivityAnalysis, monteCarloLMSR } from '../utils/montecarlo.js'
-import { forecastAR, arForecastAccuracy } from '../utils/forecast.js'
+import { forecastAR, arForecastAccuracy, holtForecast } from '../utils/forecast.js'
 import { runABM, abmChartData } from '../utils/abm.js'
 import { favoriteLongshotBias, detectNegativeHypeTrap } from '../utils/signals.js'
 
@@ -823,6 +823,146 @@ function NegativeHypeTrapSection({ bojSeries, trades }) {
   )
 }
 
+// ── Section: 7-Day Price Forecast (Holt's Exponential Smoothing) ──
+function PriceForecastSection({ snapshots }) {
+  // Build per-market, per-outcome price series from snapshots
+  const forecastData = useMemo(() => {
+    const byMarket = {}
+    for (const snap of snapshots) {
+      const key = snap.market
+      if (!byMarket[key]) byMarket[key] = {}
+      if (!byMarket[key][snap.outcomeIndex]) byMarket[key][snap.outcomeIndex] = []
+      byMarket[key][snap.outcomeIndex].push({ ts: snap.timestamp, price: snap.price ?? 0 })
+    }
+    // Sort by timestamp, compute Holt forecast per outcome
+    return SIGNALS_MARKETS.map(mkt => {
+      const addr = mkt.address.toLowerCase()
+      const outcomeData = byMarket[addr] ?? {}
+      const outcomes = mkt.outcomeLabels.map((label, i) => {
+        const series = (outcomeData[i] ?? []).sort((a, b) => a.ts - b.ts).map(p => p.price)
+        const currentPrice = series.length ? series[series.length - 1] : null
+        const fc = series.length >= 2 ? holtForecast(series, 0.3, 0.1, 7) : []
+        const forecast7d = fc[6]?.forecast ?? currentPrice
+        const delta = currentPrice != null && forecast7d != null ? forecast7d - currentPrice : null
+        // Mini sparkline points: last 5 historical + 7 forecast
+        const hist = series.slice(-5)
+        const fcVals = fc.map(f => f.forecast)
+        return { label, currentPrice, forecast7d, delta, hist, fcVals, color: mkt.colors[i] }
+      })
+      // Biggest move
+      const biggestMove = outcomes.reduce((best, o) =>
+        o.delta != null && (best == null || Math.abs(o.delta) > Math.abs(best.delta)) ? o : best, null
+      )
+      return { mkt, outcomes, biggestMove }
+    })
+  }, [snapshots])
+
+  return (
+    <div className="card">
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16, flexWrap: 'wrap', gap: 8 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <span style={{ fontSize: 20 }}>🔮</span>
+          <span style={{ fontSize: 18, fontWeight: 700 }}>Price Forecast</span>
+          <span style={{ padding: '2px 10px', borderRadius: 20, fontSize: 11, fontWeight: 700, background: 'var(--accent)', color: '#fff' }}>
+            7-DAY HORIZON
+          </span>
+        </div>
+        <span style={{ fontSize: 11, color: 'var(--fg2)', fontFamily: 'var(--mono)' }}>
+          Exponential Smoothing + Linear Trend
+        </span>
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 16 }}>
+        {forecastData.map(({ mkt, outcomes, biggestMove }) => (
+          <div key={mkt.id} style={{
+            border: `2px solid ${mkt.colors[0]}30`, borderRadius: 10, padding: 14,
+            display: 'flex', flexDirection: 'column', gap: 8,
+          }}>
+            {/* Market header */}
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+              <span style={{ fontSize: 11, fontWeight: 700, color: mkt.colors[0], letterSpacing: '0.06em' }}>
+                {mkt.nameEn.toUpperCase()}
+              </span>
+              {biggestMove?.delta != null && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <span style={{ fontSize: 10, color: 'var(--fg2)' }}>Biggest move:</span>
+                  <span style={{ fontSize: 10, color: 'var(--fg2)', maxWidth: 80, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {biggestMove.label.slice(0, 12)}…
+                  </span>
+                  <span style={{
+                    padding: '2px 8px', borderRadius: 12, fontSize: 11, fontWeight: 700,
+                    background: biggestMove.delta > 0 ? 'rgba(52,211,153,0.2)' : 'rgba(248,113,113,0.2)',
+                    color: biggestMove.delta > 0 ? 'var(--green)' : 'var(--red)',
+                  }}>
+                    {biggestMove.delta > 0 ? '↑' : '↓'} {(Math.abs(biggestMove.delta) * 100).toFixed(1)}%
+                  </span>
+                </div>
+              )}
+            </div>
+
+            {/* Per-outcome rows */}
+            {outcomes.map((o, oi) => {
+              if (o.currentPrice == null) return null
+              const dPct = o.delta != null ? (o.delta * 100).toFixed(1) : null
+              const rising = o.delta != null && o.delta > 0
+
+              // Mini SVG sparkline (5 hist + 7 forecast = 12 points)
+              const allVals = [...o.hist, ...o.fcVals]
+              const minV = Math.min(...allVals, 0)
+              const maxV = Math.max(...allVals, 1)
+              const range = maxV - minV || 0.01
+              const SW = 80, SH = 28
+              const toX = i => (i / (allVals.length - 1)) * SW
+              const toY = v => SH - ((v - minV) / range) * (SH - 4) - 2
+
+              const histPts = o.hist.map((v, i) => `${toX(i)},${toY(v)}`).join(' ')
+              const fcPts = o.fcVals.map((v, i) => `${toX(o.hist.length - 1 + i)},${toY(v)}`).join(' ')
+
+              return (
+                <div key={oi} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 0', borderBottom: '1px solid var(--border)' }}>
+                  <div style={{ width: 8, height: 8, borderRadius: '50%', background: o.color, flexShrink: 0 }} />
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: 11, color: 'var(--fg2)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {o.label.length > 14 ? o.label.slice(0, 14) + '…' : o.label}
+                    </div>
+                  </div>
+                  <div style={{ fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--fg2)' }}>
+                    {(o.currentPrice * 100).toFixed(1)}%
+                  </div>
+                  <div style={{ fontSize: 10, color: 'var(--fg2)' }}>→</div>
+                  <div style={{ fontFamily: 'var(--mono)', fontSize: 11, fontWeight: 700, color: o.color }}>
+                    {(o.forecast7d * 100).toFixed(1)}%
+                  </div>
+                  {dPct != null && (
+                    <span style={{
+                      padding: '1px 6px', borderRadius: 8, fontSize: 10, fontWeight: 700,
+                      background: rising ? 'rgba(52,211,153,0.15)' : Math.abs(o.delta) < 0.001 ? 'var(--bg3)' : 'rgba(248,113,113,0.15)',
+                      color: rising ? 'var(--green)' : Math.abs(o.delta) < 0.001 ? 'var(--fg2)' : 'var(--red)',
+                    }}>
+                      {rising ? '↑' : Math.abs(o.delta) < 0.001 ? '→' : '↓'} {rising ? '+' : ''}{dPct}%
+                    </span>
+                  )}
+                  {/* Mini sparkline */}
+                  {allVals.length > 1 && (
+                    <svg width={SW} height={SH} style={{ flexShrink: 0 }}>
+                      {o.hist.length > 1 && (
+                        <polyline points={histPts} fill="none" stroke="var(--fg2)" strokeWidth={1} opacity={0.5} />
+                      )}
+                      {o.fcVals.length > 1 && (
+                        <polyline points={fcPts} fill="none" stroke={o.color} strokeWidth={1.5} />
+                      )}
+                    </svg>
+                  )}
+                </div>
+              )
+            })}
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
 // ── Main Predictions Tab ──────────────────────────────────────────
 export default function PredictionsTab({
   metrics = {},
@@ -1067,6 +1207,9 @@ export default function PredictionsTab({
           </div>
         </div>
       )}
+
+      {/* ── Price Forecast 7-Day Horizon ──────────────────────── */}
+      <PriceForecastSection snapshots={snapshots} />
 
       {/* ── Formula reference ─────────────────────────────────── */}
       <div className="card" style={{ fontSize: 11, color: 'var(--fg2)', lineHeight: 1.8 }}>

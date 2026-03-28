@@ -96,3 +96,40 @@ export function arForecastAccuracy(series, p = 7, testFraction = 0.2) {
   }
   return total > 0 ? correct / total : null
 }
+
+// ── Holt's Double Exponential Smoothing (7-day horizon) ───────────
+// Level + Trend: browser-native "Exponential Smoothing + Linear Trend"
+// Returns [{ step, forecast, lower, upper }] — all values clamped to [0,1]
+export function holtForecast(series, alpha = 0.3, beta = 0.1, h = 7) {
+  const valid = series.filter(v => v != null && !isNaN(v))
+  if (valid.length < 2) return []
+
+  // Initialise level and trend
+  let L = valid[0]
+  let B = valid[1] - valid[0]
+
+  const fitted = []
+  for (let t = 1; t < valid.length; t++) {
+    const Lprev = L
+    L = alpha * valid[t] + (1 - alpha) * (L + B)
+    B = beta * (L - Lprev) + (1 - beta) * B
+    fitted.push(L + B)
+  }
+
+  // Residual std for CI
+  const residuals = valid.slice(1).map((v, i) => v - fitted[i])
+  const resSd = residuals.length > 1
+    ? Math.sqrt(residuals.reduce((s, r) => s + r * r, 0) / residuals.length)
+    : 0.02
+
+  return Array.from({ length: h }, (_, i) => {
+    const step = i + 1
+    const fc = Math.max(0, Math.min(1, L + step * B))
+    return {
+      step,
+      forecast: fc,
+      lower: Math.max(0, fc - 1.96 * resSd * Math.sqrt(step)),
+      upper: Math.min(1, fc + 1.96 * resSd * Math.sqrt(step)),
+    }
+  })
+}
