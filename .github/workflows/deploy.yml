@@ -4,7 +4,6 @@ on:
   push:
     branches:
       - main
-      - claude/blockchain-data-dashboard-x3OoN
   workflow_dispatch:
 
 permissions:
