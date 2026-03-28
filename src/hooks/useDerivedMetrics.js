@@ -277,6 +277,58 @@ export default function useDerivedMetrics({ trades, snapshots, pmEvents, attenti
     return { d, p, significant: p < 0.05 }
   }, [bojSeries])
 
+  // ── Per-market data (all SIGNALS markets) ────────────────────────
+  const perMarketSeries = useMemo(() => {
+    const result = {}
+    for (const market of SIGNALS_MARKETS) {
+      const addr = market.address.toLowerCase()
+      const snaps = snapshotSeries[addr] ?? []
+      const byTs = {}
+      for (const s of snaps) {
+        if (!byTs[s.timestamp]) byTs[s.timestamp] = {}
+        byTs[s.timestamp][s.outcomeIndex] = s.price
+      }
+      const sorted = Object.entries(byTs)
+        .sort(([a], [b]) => Number(a) - Number(b))
+        .map(([ts, ot]) => {
+          const maxIdx = Math.max(...Object.keys(ot).map(Number), market.outcomeLabels.length - 1)
+          const pricesArr = []
+          for (let i = 0; i <= maxIdx; i++) pricesArr.push(ot[i] ?? 0)
+          const p = lmsrPrices(pricesArr)
+          const siRaw = (market.hikeIndex != null && market.holdIndex != null)
+            ? computeSIRaw(p, market.hikeIndex, market.holdIndex)
+            : null
+          return {
+            timestamp: Number(ts),
+            prices: p,
+            siRaw,
+            pHike: market.hikeIndex != null ? (p[market.hikeIndex] ?? 0) : null,
+            pHold: market.holdIndex != null ? (p[market.holdIndex] ?? 0) : null,
+          }
+        })
+      result[market.id] = sorted
+    }
+    return result
+  }, [snapshotSeries])
+
+  const perMarketPrices = useMemo(() => {
+    const result = {}
+    for (const market of SIGNALS_MARKETS) {
+      const addr = market.address.toLowerCase()
+      const raw = latestPrices[addr]
+      result[market.id] = raw ? lmsrPrices(raw.map(p => p ?? 0)) : null
+    }
+    return result
+  }, [latestPrices])
+
+  const perMarketTrades = useMemo(() => {
+    const result = {}
+    for (const market of SIGNALS_MARKETS) {
+      result[market.id] = trades.filter(t => t.market === market.address.toLowerCase())
+    }
+    return result
+  }, [trades])
+
   // ── Lens 6: Demand Data ───────────────────────────────────────
   // Decision Lead Time: placeholder until official announcement available
   const dlt = null  // T_official - T_signal_threshold: computed post-resolution
@@ -336,6 +388,11 @@ export default function useDerivedMetrics({ trades, snapshots, pmEvents, attenti
     mcp,
     cg,
     rstResult,
+
+    // Per-market
+    perMarketSeries,
+    perMarketPrices,
+    perMarketTrades,
 
     // Lens 6
     dlt,

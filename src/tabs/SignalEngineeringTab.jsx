@@ -1,6 +1,13 @@
+import { useMemo } from 'react'
 import PriceLineChart from '../components/charts/PriceLineChart.jsx'
 import BarChartPanel from '../components/charts/BarChartPanel.jsx'
+import ProbabilityBar from '../components/charts/ProbabilityBar.jsx'
 import MetricBadge from '../components/cards/MetricBadge.jsx'
+import MarketSelector from '../components/ui/MarketSelector.jsx'
+import MarketLeaderBadge from '../components/ui/MarketLeaderBadge.jsx'
+import { SIGNALS_MARKETS } from '../constants/markets.js'
+import { computeMarketLeader } from '../utils/marketLeader.js'
+import { WALLETS } from '../constants/wallets.js'
 
 const VARIANT_COLORS = {
   raw:      '#9999aa',
@@ -20,14 +27,33 @@ const VARIANT_LABELS = {
   ratio:    'Hike/Hold Ratio',
 }
 
-export default function SignalEngineeringTab({ bojSeries = [], metrics = {} }) {
+const OUTCOME_COLORS = ['#6c8fff', '#a78bfa', '#34d399', '#fbbf24', '#f87171']
+
+export default function SignalEngineeringTab({
+  bojSeries = [],
+  metrics = {},
+  selectedMarketId = 'boj',
+  onMarketChange,
+}) {
   const {
     signalZoo, variantICs, ensembleSignal, decomposition,
     icByLag, kStar, les, divergenceSignal, compositeIndex,
     cg, wfa, mcp, rstResult, actionableThreshold,
+    perMarketSeries, perMarketTrades,
   } = metrics
 
-  // SE-1: Build overlay chart data (6 MA variants)
+  const selectedMarket = SIGNALS_MARKETS.find(m => m.id === selectedMarketId) ?? SIGNALS_MARKETS[0]
+  const isBOJ = selectedMarket.hikeIndex != null
+
+  const activeSeries = perMarketSeries?.[selectedMarketId] ?? []
+  const activeMarketTrades = perMarketTrades?.[selectedMarketId] ?? []
+
+  const leader = useMemo(
+    () => computeMarketLeader(activeMarketTrades, selectedMarket, WALLETS),
+    [activeMarketTrades, selectedMarket]
+  )
+
+  // ── BOJ-specific chart data ───────────────────────────────────────
   const zooCols = ['raw', 'ma3', 'ma5', 'zScores', 'momentum', 'ratio']
   const zooChartData = bojSeries.map((s, i) => {
     const row = { timestamp: s.timestamp }
@@ -41,26 +67,22 @@ export default function SignalEngineeringTab({ bojSeries = [], metrics = {} }) {
     key: k, label: VARIANT_LABELS[k], color: VARIANT_COLORS[k],
   }))
 
-  // IC per variant bar chart
   const icData = Object.entries(variantICs ?? {}).map(([k, v]) => ({
     label: VARIANT_LABELS[k] ?? k,
     value: v,
   }))
 
-  // Rolling IC by lag bar chart
   const icLagData = (icByLag ?? []).map(({ lag, ic }) => ({
     label: `k=${lag}`,
     value: ic,
   }))
 
-  // Ensemble signal chart data
   const ensembleData = bojSeries.map((s, i) => ({
     timestamp: s.timestamp,
     ensemble:  (ensembleSignal ?? [])[i] ?? null,
     siRaw:     s.siRaw,
   }))
 
-  // Decomposition chart data
   const decompData = bojSeries.map((s, i) => ({
     timestamp: s.timestamp,
     trend:     (decomposition?.trend     ?? [])[i] ?? null,
@@ -68,14 +90,102 @@ export default function SignalEngineeringTab({ bojSeries = [], metrics = {} }) {
     residual:  (decomposition?.residual  ?? [])[i] ?? null,
   }))
 
-  // Composite index chart data
   const compositeData = bojSeries.map((s, i) => ({
     timestamp: s.timestamp,
     It:        (compositeIndex ?? [])[i] ?? null,
   }))
 
+  // ── Non-BOJ chart data ────────────────────────────────────────────
+  const outcomeCount = selectedMarket.outcomeLabels?.length ?? 5
+
+  const priceChartData = activeSeries.map(s => {
+    const row = { timestamp: s.timestamp }
+    for (let i = 0; i < outcomeCount; i++) {
+      row[`o${i}`] = s.prices?.[i] ?? null
+    }
+    return row
+  })
+
+  const outcomeLines = (selectedMarket.outcomeLabels ?? []).map((lbl, i) => ({
+    key: `o${i}`,
+    label: lbl,
+    color: OUTCOME_COLORS[i % OUTCOME_COLORS.length],
+  }))
+
+  // Latest outcome probabilities
+  const latestPrices = activeSeries.length > 0 ? activeSeries[activeSeries.length - 1].prices : []
+  const currentOutcomes = (selectedMarket.outcomeLabels ?? []).map((lbl, i) => ({
+    label: lbl,
+    probability: latestPrices[i] ?? 0,
+    color: OUTCOME_COLORS[i % OUTCOME_COLORS.length],
+  }))
+
+  // Trade volume by outcome
+  const tradeVolumeByOutcome = (selectedMarket.outcomeLabels ?? []).map((lbl, i) => ({
+    label: lbl,
+    value: activeMarketTrades.filter(t => t.outcomeIndex === i).length,
+  }))
+
+  const headerRow = (
+    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 10, marginBottom: 4 }}>
+      <MarketSelector
+        markets={SIGNALS_MARKETS}
+        selectedId={selectedMarketId}
+        onChange={onMarketChange}
+        label="Market"
+      />
+      <MarketLeaderBadge leader={leader} market={selectedMarket} />
+    </div>
+  )
+
+  // ── Non-BOJ layout ────────────────────────────────────────────────
+  if (!isBOJ) {
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+        {headerRow}
+
+        {activeSeries.length === 0 ? (
+          <div className="card">
+            <div className="card-title">{selectedMarket.nameEn} — No price data available</div>
+            <div style={{ color: 'var(--fg2)', fontSize: 12 }}>
+              No snapshots recorded for this market yet.
+            </div>
+          </div>
+        ) : (
+          <>
+            <div className="card">
+              <div className="card-title">{selectedMarket.nameEn} — Outcome Probability Series</div>
+              <PriceLineChart
+                data={priceChartData}
+                lines={outcomeLines}
+                height={240}
+              />
+            </div>
+
+            <div className="panel-grid panel-grid-2">
+              <div className="card">
+                <div className="card-title">Current Outcome Probabilities</div>
+                <ProbabilityBar outcomes={currentOutcomes} />
+              </div>
+              <BarChartPanel
+                data={tradeVolumeByOutcome}
+                xKey="label"
+                yKey="value"
+                title="Trade Volume by Outcome"
+                color="var(--accent)"
+                height={180}
+              />
+            </div>
+          </>
+        )}
+      </div>
+    )
+  }
+
+  // ── BOJ layout (full SE-1 through SE-6) ───────────────────────────
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+      {headerRow}
 
       {/* SE-1: Signal Zoo — 6 MA variants overlay */}
       <div className="card">

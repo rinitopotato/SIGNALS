@@ -1,7 +1,10 @@
-import { useState } from 'react'
+import { useState, useMemo } from 'react'
 import TraderCard from '../components/cards/TraderCard.jsx'
+import MarketSelector from '../components/ui/MarketSelector.jsx'
+import MarketLeaderBadge from '../components/ui/MarketLeaderBadge.jsx'
 import { WALLETS } from '../constants/wallets.js'
-import { SIGNALS_MARKET_MAP } from '../constants/markets.js'
+import { SIGNALS_MARKETS, SIGNALS_MARKET_MAP } from '../constants/markets.js'
+import { computeMarketLeader } from '../utils/marketLeader.js'
 import { toJST, toJSTShort, formatNum, truncateAddress } from '../utils/formatters.js'
 
 function TraderDetail({ trader, trades }) {
@@ -53,20 +56,60 @@ function TraderDetail({ trader, trades }) {
   )
 }
 
-export default function PlayersTab({ trades = [], humanCapital = [] }) {
+export default function PlayersTab({ trades = [], humanCapital = [], selectedMarketId = 'boj', onMarketChange }) {
   const [expanded, setExpanded] = useState(null)
+
+  const selectedMarket = SIGNALS_MARKETS.find(m => m.id === selectedMarketId) ?? SIGNALS_MARKETS[0]
+
+  const filteredTrades = useMemo(
+    () => trades.filter(t => t.market === selectedMarket.address.toLowerCase()),
+    [trades, selectedMarket]
+  )
+
+  const leader = useMemo(
+    () => computeMarketLeader(filteredTrades, selectedMarket, WALLETS),
+    [filteredTrades, selectedMarket]
+  )
+
+  // Per-wallet filtered trade count for the selected market
+  const filteredCountByAddress = useMemo(() => {
+    const map = {}
+    for (const w of WALLETS) map[w.address] = 0
+    for (const t of filteredTrades) {
+      const addr = t.trader
+      if (addr in map) map[addr]++
+    }
+    return map
+  }, [filteredTrades])
 
   const hcMap = Object.fromEntries((humanCapital ?? []).map(hc => [hc.address, hc]))
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+      {/* Market selector + leader header */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 10 }}>
+        <MarketSelector
+          markets={SIGNALS_MARKETS}
+          selectedId={selectedMarketId}
+          onChange={onMarketChange}
+          label="Market"
+        />
+        <MarketLeaderBadge leader={leader} market={selectedMarket} />
+      </div>
+
       {/* Player cards grid */}
       <div className="panel-grid" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))' }}>
         {WALLETS.map(w => {
           const hc = hcMap[w.address] ?? { ...w, tradeCount: 0, bs: null, ic: null, sr: null, ias: null, ns: null }
+          const mktCount = filteredCountByAddress[w.address] ?? 0
           return (
             <div key={w.address}>
               <TraderCard trader={hc} />
+              {mktCount > 0 && (
+                <div style={{ fontSize: 11, color: 'var(--accent)', fontFamily: 'var(--mono)', padding: '2px 4px' }}>
+                  {mktCount} in {selectedMarket.nameEn}
+                </div>
+              )}
               <button
                 onClick={() => setExpanded(expanded === w.address ? null : w.address)}
                 style={{
@@ -107,6 +150,7 @@ export default function PlayersTab({ trades = [], humanCapital = [] }) {
               <th>Trader</th>
               <th>Group</th>
               <th>Trades</th>
+              <th>In {selectedMarket.nameEn}</th>
               <th>Brier Score</th>
               <th>IC</th>
               <th>IAS</th>
@@ -117,11 +161,13 @@ export default function PlayersTab({ trades = [], humanCapital = [] }) {
           <tbody>
             {WALLETS.map(w => {
               const hc = hcMap[w.address] ?? {}
+              const mktCount = filteredCountByAddress[w.address] ?? 0
               return (
                 <tr key={w.address}>
                   <td style={{ color: 'var(--accent)', fontWeight: 700 }}>{w.name}</td>
                   <td style={{ color: 'var(--fg2)' }}>{w.group}</td>
                   <td>{hc.tradeCount ?? 0}</td>
+                  <td style={{ color: mktCount > 0 ? 'var(--accent)' : 'var(--fg2)' }}>{mktCount}</td>
                   <td style={{ color: hc.bs != null ? (hc.bs < 0.2 ? 'var(--green)' : hc.bs < 0.35 ? 'var(--amber)' : 'var(--red)') : 'var(--fg2)' }}>
                     {hc.bs != null ? hc.bs.toFixed(3) : '—'}
                   </td>

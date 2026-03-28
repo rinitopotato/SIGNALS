@@ -93,18 +93,34 @@ function EventPanel({ event, pmMeta }) {
   )
 }
 
-export default function PolymarketTab({ events = [], isLoading }) {
+export default function PolymarketTab({ events = [], isLoading, selectedEventIdx = 0, onEventChange }) {
   if (isLoading && !events.length) {
     return <LoadingSpinner message="Fetching Polymarket data…" />
   }
 
+  const safeIdx = Math.min(selectedEventIdx, POLYMARKET_EVENTS.length - 1)
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-      <div className="panel-grid panel-grid-3">
-        {POLYMARKET_EVENTS.map((pmMeta, i) => (
-          <EventPanel key={pmMeta.slug} event={events[i]} pmMeta={pmMeta} />
-        ))}
+      {/* Event selector */}
+      <div className="market-selector">
+        <span className="market-selector__label">Event</span>
+        <div className="market-selector__pills">
+          {POLYMARKET_EVENTS.map((ev, i) => (
+            <button
+              key={ev.slug}
+              className={`market-pill${safeIdx === i ? ' active' : ''}`}
+              onClick={() => onEventChange?.(i)}
+            >
+              <span className="market-pill__en">{ev.label}</span>
+            </button>
+          ))}
+        </div>
       </div>
+
+      {/* Single selected event panel — full width */}
+      <EventPanel event={events[safeIdx]} pmMeta={POLYMARKET_EVENTS[safeIdx]} />
+
       <div className="card" style={{ fontSize: 11, color: 'var(--fg2)' }}>
         Polymarket CLOB — mid-price = (best_ask + best_bid) / 2 ·
         Micro-price = (V_bid·ask + V_ask·bid) / (V_bid + V_ask) ·
