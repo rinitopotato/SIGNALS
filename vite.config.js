@@ -6,5 +6,17 @@ export default defineConfig({
   base: '/SIGNALS/',
   server: {
     port: 5173,
+    proxy: {
+      '/api/gamma': {
+        target: 'https://gamma-api.polymarket.com',
+        changeOrigin: true,
+        rewrite: path => path.replace(/^\/api\/gamma/, ''),
+      },
+      '/api/clob': {
+        target: 'https://clob.polymarket.com',
+        changeOrigin: true,
+        rewrite: path => path.replace(/^\/api\/clob/, ''),
+      },
+    },
   },
 })

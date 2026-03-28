@@ -9,19 +9,21 @@ import SignalEngineeringTab from './tabs/SignalEngineeringTab.jsx'
 import NetworkTab from './tabs/NetworkTab.jsx'
 import PlayersTab from './tabs/PlayersTab.jsx'
 import AnalyticsTab from './tabs/AnalyticsTab.jsx'
+import PredictionsTab from './tabs/PredictionsTab.jsx'
 import useGoldsky from './hooks/useGoldsky.js'
 import usePolymarket from './hooks/usePolymarket.js'
 import useAttention from './hooks/useAttention.js'
 import useDerivedMetrics from './hooks/useDerivedMetrics.js'
 
 const TABS = [
-  { id: 'overview',   label: 'Overview' },
-  { id: 'signals',    label: 'SIGNALS (3 Markets)' },
-  { id: 'polymarket', label: 'Polymarket' },
-  { id: 'signal-eng', label: 'Signal Engineering' },
-  { id: 'network',    label: 'Network + HC/SC' },
-  { id: 'players',    label: 'Players' },
-  { id: 'analytics',  label: 'Analytics' },
+  { id: 'overview',     label: 'Overview' },
+  { id: 'signals',      label: 'SIGNALS (3 Markets)' },
+  { id: 'polymarket',   label: 'Polymarket' },
+  { id: 'predictions',  label: 'Predictions' },
+  { id: 'signal-eng',   label: 'Signal Engineering' },
+  { id: 'network',      label: 'Network + HC/SC' },
+  { id: 'players',      label: 'Players' },
+  { id: 'analytics',    label: 'Analytics' },
 ]
 
 export default function App() {
@@ -69,6 +71,15 @@ export default function App() {
           <PolymarketTab
             events={polymarket.events}
             isLoading={polymarket.isLoading}
+          />
+        )
+      case 'predictions':
+        return (
+          <PredictionsTab
+            metrics={metrics}
+            trades={goldsky.trades}
+            snapshots={goldsky.snapshots}
+            pmEvents={polymarket.events}
           />
         )
       case 'signal-eng':

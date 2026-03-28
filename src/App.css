@@ -8,6 +8,7 @@
   --fg2: #9999aa;
   --accent: #6c8fff;
   --accent2: #a78bfa;
+  --purple: #c084fc;
   --green: #34d399;
   --amber: #fbbf24;
   --red: #f87171;
@@ -373,3 +374,6 @@ a:hover { text-decoration: underline; }
 .leader-badge-crown { color: var(--amber); font-size: 14px; }
 .leader-badge-name { color: var(--accent); font-weight: 700; }
 .leader-badge-stat { color: var(--fg2); font-family: var(--mono); }
+
+/* ── Predictions tab ─────────────────────────────────────────────── */
+.confidence-rings { display: flex; gap: 24px; flex-wrap: wrap; align-items: flex-start; }

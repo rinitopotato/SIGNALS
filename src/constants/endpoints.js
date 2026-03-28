@@ -1,8 +1,10 @@
 export const GOLDSKY_URL =
   'https://api.goldsky.com/api/public/project_cmiy1lygiilhr01t0fjo6erf5/subgraphs/signals-market-prod/v1.0.0/gn'
 
-export const GAMMA_BASE = 'https://gamma-api.polymarket.com'
-export const CLOB_BASE  = 'https://clob.polymarket.com'
+// In dev (localhost) use Vite proxy to avoid CORS; in production hit APIs directly
+const isDev = import.meta.env.DEV
+export const GAMMA_BASE = isDev ? '/api/gamma' : 'https://gamma-api.polymarket.com'
+export const CLOB_BASE  = isDev ? '/api/clob'  : 'https://clob.polymarket.com'
 export const WIKI_BASE  = 'https://wikimedia.org/api/rest_v1/metrics/pageviews'
 
 export const POLL_INTERVALS = {
