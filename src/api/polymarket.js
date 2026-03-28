@@ -2,7 +2,8 @@ import { fetchJSON } from './utils.js'
 import { GAMMA_BASE, CLOB_BASE } from '../constants/endpoints.js'
 
 // ── Gamma — event metadata ─────────────────────────────────────────
-// Correct endpoint: /events/slug/{slug}  (not /events?slug=...)
+// The /events/slug/{slug} endpoint may return either an object OR an array.
+// We normalise to a single event object in both cases (same as original approach).
 export async function fetchGammaEvents(slugs) {
   const results = await Promise.allSettled(
     slugs.map(slug =>
@@ -11,17 +12,22 @@ export async function fetchGammaEvents(slugs) {
   )
   return results.map((r, i) => {
     if (r.status === 'rejected') {
-      console.warn(`Gamma fetch failed for ${slugs[i]}:`, r.reason)
+      console.warn(`[PM] Gamma fetch failed for ${slugs[i]}:`, r.reason)
       return { slug: slugs[i], error: true, markets: [] }
     }
-    // /events/slug/{slug} returns an object directly (not an array)
-    const event = r.value ?? {}
+    // Handle both array and object responses
+    const raw   = r.value ?? {}
+    const event = Array.isArray(raw) ? (raw[0] ?? {}) : raw
+    if (!event.title && !event.markets) {
+      console.warn(`[PM] No event data for slug ${slugs[i]}:`, raw)
+      return { slug: slugs[i], error: true, markets: [] }
+    }
+    console.log(`[PM] Got event "${event.title}" with ${event.markets?.length ?? 0} markets`)
     return normaliseGammaEvent(slugs[i], event)
   })
 }
 
 // ── Gamma — full market detail (needed for clobTokenIds) ──────────
-// After getting the event stub, fetch full market data per market.
 async function fetchFullMarket(marketId) {
   return fetchJSON(`${GAMMA_BASE}/markets/${encodeURIComponent(marketId)}`)
 }
@@ -37,10 +43,10 @@ function parseClobTokenIds(raw) {
 
 function normaliseGammaEvent(slug, event) {
   const markets = (event.markets ?? []).map(m => ({
-    id:           m.id ?? '',
-    question:     m.question ?? m.title ?? '',
-    outcomes:     Array.isArray(m.outcomes) ? m.outcomes : ['Yes', 'No'],
-    clobTokenIds: parseClobTokenIds(m.clobTokenIds),
+    id:            m.id ?? '',
+    question:      m.question ?? m.title ?? '',
+    outcomes:      Array.isArray(m.outcomes) ? m.outcomes : ['Yes', 'No'],
+    clobTokenIds:  parseClobTokenIds(m.clobTokenIds),
     outcomePrices: (m.outcomePrices ?? []).map(p => parseFloat(p) || 0),
     volume:        parseFloat(m.volume ?? 0),
     liquidity:     parseFloat(m.liquidity ?? 0),
@@ -54,24 +60,31 @@ function normaliseGammaEvent(slug, event) {
 }
 
 // ── Fetch full market detail and enrich with clobTokenIds ──────────
-// Some events return market stubs without clobTokenIds; we fetch full detail.
 export async function enrichEventMarkets(gammaEvent) {
   if (gammaEvent.error) return gammaEvent
 
   const enriched = await Promise.allSettled(
     gammaEvent.markets.map(async m => {
-      if (m.clobTokenIds?.length) return m          // already has token IDs
-      if (!m.id) return m
+      // If we already have token IDs from the event-level stub, use them
+      if (m.clobTokenIds?.length) return m
+      // Otherwise fetch full market data
+      if (!m.id) {
+        console.warn('[PM] Market stub has no id:', m)
+        return m
+      }
       try {
         const full = await fetchFullMarket(m.id)
+        const tokenIds = parseClobTokenIds(full.clobTokenIds)
+        console.log(`[PM] Market "${m.question?.slice(0,40)}": ${tokenIds.length} token IDs`)
         return {
           ...m,
-          clobTokenIds:  parseClobTokenIds(full.clobTokenIds),
+          clobTokenIds:  tokenIds,
           outcomePrices: (full.outcomePrices ?? m.outcomePrices ?? []).map(p => parseFloat(p) || 0),
-          volume:        parseFloat(full.volume ?? m.volume ?? 0),
+          volume:        parseFloat(full.volume   ?? m.volume    ?? 0),
           liquidity:     parseFloat(full.liquidity ?? m.liquidity ?? 0),
         }
-      } catch {
+      } catch (err) {
+        console.warn(`[PM] fetchFullMarket failed for id ${m.id}:`, err)
         return m
       }
     })
@@ -87,18 +100,19 @@ export async function enrichEventMarkets(gammaEvent) {
 
 // ── CLOB — price history per token ────────────────────────────────
 // tokenId is a numeric string from clobTokenIds (not a condition hash).
-// interval: '1m' | '5m' | '1h' | '6h' | '1d'
 export async function fetchCLOBHistory(tokenId, interval = '1h', fidelity = 60) {
   if (!tokenId) return []
   try {
     const url = `${CLOB_BASE}/prices-history?market=${encodeURIComponent(tokenId)}&interval=${interval}&fidelity=${fidelity}`
     const data = await fetchJSON(url)
-    return (data.history ?? []).map(p => ({
+    const history = data.history ?? []
+    console.log(`[PM] CLOB token ${tokenId}: ${history.length} price points`)
+    return history.map(p => ({
       t:     Number(p.t),
       price: parseFloat(p.p),
     }))
   } catch (err) {
-    console.warn(`CLOB history fetch failed for token ${tokenId}:`, err)
+    console.warn(`[PM] CLOB history fetch failed for token ${tokenId}:`, err)
     return []
   }
 }
@@ -118,7 +132,7 @@ export async function fetchCLOBBook(tokenId) {
     const imbalance = denom > 0 ? (bidVol - askVol) / denom : 0
     return { bestBid, bestAsk, bidVol, askVol, mid, micro, imbalance }
   } catch (err) {
-    console.warn(`CLOB book fetch failed for token ${tokenId}:`, err)
+    console.warn(`[PM] CLOB book fetch failed for token ${tokenId}:`, err)
     return null
   }
 }
@@ -130,7 +144,10 @@ export async function fetchEventHistories(gammaEvent) {
   const marketsWithHistory = await Promise.allSettled(
     gammaEvent.markets.map(async m => {
       const tokenIds = m.clobTokenIds ?? []
-      if (!tokenIds.length) return { ...m, tokenHistories: [] }
+      if (!tokenIds.length) {
+        console.warn(`[PM] No token IDs for market "${m.question?.slice(0,40)}"`)
+        return { ...m, tokenHistories: [] }
+      }
 
       const histories = await Promise.allSettled(
         tokenIds.map(tid => fetchCLOBHistory(tid))

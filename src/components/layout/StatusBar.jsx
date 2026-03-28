@@ -32,18 +32,29 @@ function LiveClock() {
   return <span>{timeStr}</span>
 }
 
-export default function StatusBar({ goldskyTs, polymarketTs, attentionTs }) {
+export default function StatusBar({ goldskyTs, polymarketTs, attentionTs, theme, onToggleTheme }) {
   const feeds = [
     { name: 'SIGNALS',    lastFetchedAt: goldskyTs,    pollInterval: POLL_INTERVALS.goldsky },
     { name: 'Polymarket', lastFetchedAt: polymarketTs, pollInterval: POLL_INTERVALS.polymarket },
     { name: 'Attention',  lastFetchedAt: attentionTs,  pollInterval: POLL_INTERVALS.attention },
   ]
+  const isDark = theme !== 'light'
   return (
     <div className="status-bar">
       <span className="brand">SIGNALS</span>
       {feeds.map(f => <FeedPill key={f.name} {...f} />)}
-      <span style={{ marginLeft: 'auto', color: 'var(--fg2)', fontSize: 11 }}>
-        Fukuhara Seminar · Group 3 · <LiveClock />
+      <span style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 12 }}>
+        <button
+          onClick={onToggleTheme}
+          className="theme-toggle"
+          title={isDark ? 'Switch to light mode' : 'Switch to dark mode'}
+          aria-label="Toggle theme"
+        >
+          {isDark ? '☀️' : '🌙'}
+        </button>
+        <span style={{ color: 'var(--fg2)', fontSize: 11 }}>
+          Fukuhara Seminar · Group 3 · <LiveClock />
+        </span>
       </span>
     </div>
   )

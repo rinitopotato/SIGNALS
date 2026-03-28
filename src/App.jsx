@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import TabBar from './components/layout/TabBar.jsx'
 import StatusBar from './components/layout/StatusBar.jsx'
 import LoadingSpinner from './components/layout/LoadingSpinner.jsx'
@@ -27,6 +27,16 @@ const TABS = [
 export default function App() {
   const [activeTab, setActiveTab] = useState('overview')
 
+  // ── Theme (dark / light) ────────────────────────────────────────
+  const [theme, setTheme] = useState(() =>
+    localStorage.getItem('signals-theme') ?? 'dark'
+  )
+  useEffect(() => {
+    document.body.classList.toggle('light-mode', theme === 'light')
+    localStorage.setItem('signals-theme', theme)
+  }, [theme])
+  const toggleTheme = () => setTheme(t => t === 'dark' ? 'light' : 'dark')
+
   const goldsky    = useGoldsky()
   const polymarket = usePolymarket()
   const attention  = useAttention()
@@ -53,11 +63,7 @@ export default function App() {
           />
         )
       case 'signals':
-        return (
-          <SignalsTab
-            snapshots={goldsky.snapshots}
-          />
-        )
+        return <SignalsTab snapshots={goldsky.snapshots} />
       case 'polymarket':
         return (
           <PolymarketTab
@@ -73,11 +79,7 @@ export default function App() {
           />
         )
       case 'network':
-        return (
-          <NetworkTab
-            metrics={metrics}
-          />
-        )
+        return <NetworkTab metrics={metrics} />
       case 'players':
         return (
           <PlayersTab
@@ -105,6 +107,8 @@ export default function App() {
         goldskyTs={goldsky.lastFetchedAt}
         polymarketTs={polymarket.lastFetchedAt}
         attentionTs={attention.lastFetchedAt}
+        theme={theme}
+        onToggleTheme={toggleTheme}
       />
       <TabBar tabs={TABS} activeTab={activeTab} onTabChange={setActiveTab} />
       <main className="app-main">
