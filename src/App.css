@@ -357,3 +357,19 @@ a:hover { text-decoration: underline; }
 .metric-item { position: relative; }
 .info-btn { position: absolute; top: 6px; right: 6px; background: none; border: none; color: var(--fg2); cursor: pointer; font-size: 11px; padding: 0; line-height: 1; opacity: 0.5; }
 .info-btn:hover { opacity: 1; color: var(--accent); }
+
+/* ── Market selector ─────────────────────────────────────────────── */
+.market-selector { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 14px; }
+.market-selector-btn {
+  padding: 5px 12px; border-radius: 20px; border: 1px solid var(--border);
+  background: var(--bg3); color: var(--fg2); font-size: 11px; font-family: var(--mono);
+  cursor: pointer; transition: all 0.15s; white-space: nowrap;
+}
+.market-selector-btn:hover { border-color: var(--accent); color: var(--accent); }
+.market-selector-btn.active { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 700; }
+
+/* ── Per-market leader badge ─────────────────────────────────────── */
+.leader-badge { display: inline-flex; align-items: center; gap: 6px; background: var(--bg3); border: 1px solid var(--border); border-radius: 6px; padding: 6px 12px; font-size: 12px; }
+.leader-badge-crown { color: var(--amber); font-size: 14px; }
+.leader-badge-name { color: var(--accent); font-weight: 700; }
+.leader-badge-stat { color: var(--fg2); font-family: var(--mono); }

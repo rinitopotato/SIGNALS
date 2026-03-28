@@ -1,11 +1,19 @@
 import { useState } from 'react'
 import { WALLETS } from '../constants/wallets.js'
-import { SIGNALS_MARKET_MAP } from '../constants/markets.js'
+import { SIGNALS_MARKETS, SIGNALS_MARKET_MAP } from '../constants/markets.js'
 import { toJST, toJSTShort, formatNum, truncateAddress } from '../utils/formatters.js'
+import MarketSelector, { SIGNALS_ONLY } from '../components/layout/MarketSelector.jsx'
 
-function TraderDetail({ trader, trades }) {
+function TraderDetail({ trader, trades, marketFilter }) {
   const myTrades = trades
-    .filter(t => t.trader === trader.address.toLowerCase())
+    .filter(t => {
+      if (t.trader !== trader.address.toLowerCase()) return false
+      if (marketFilter && marketFilter !== 'all') {
+        const mkt = SIGNALS_MARKETS.find(m => m.id === marketFilter)
+        return mkt ? t.market === mkt.address.toLowerCase() : true
+      }
+      return true
+    })
     .sort((a, b) => b.timestamp - a.timestamp)
 
   return (
@@ -65,10 +73,34 @@ const SORT_KEYS = {
   ns:         w => w.ns ?? 9999,
 }
 
+// Compute per-market trade counts and find leader
+function computeMarketStats(trades, marketId) {
+  const mkt = SIGNALS_MARKETS.find(m => m.id === marketId)
+  if (!mkt) return { counts: {}, leader: null }
+
+  const addr = mkt.address.toLowerCase()
+  const filtered = trades.filter(t => t.market === addr)
+
+  const counts = {}
+  filtered.forEach(t => {
+    const trader = t.trader
+    counts[trader] = (counts[trader] ?? 0) + 1
+  })
+
+  const leaderAddr = Object.entries(counts).sort((a, b) => b[1] - a[1])[0]?.[0]
+  const leaderWallet = leaderAddr ? WALLETS.find(w => w.address.toLowerCase() === leaderAddr) : null
+
+  return {
+    counts,
+    leader: leaderWallet ? { name: leaderWallet.name, count: counts[leaderAddr] } : null,
+  }
+}
+
 export default function PlayersTab({ trades = [], humanCapital = [] }) {
-  const [sortKey, setSortKey]   = useState('tradeCount')
-  const [sortDir, setSortDir]   = useState('desc')
-  const [expanded, setExpanded] = useState(null)
+  const [sortKey, setSortKey]     = useState('tradeCount')
+  const [sortDir, setSortDir]     = useState('desc')
+  const [expanded, setExpanded]   = useState(null)
+  const [marketId, setMarketId]   = useState('all')
 
   const hcMap = Object.fromEntries((humanCapital ?? []).map(hc => [hc.address, hc]))
 
@@ -81,8 +113,20 @@ export default function PlayersTab({ trades = [], humanCapital = [] }) {
     }
   }
 
+  // Per-market trade count for selected market (used for ranking)
+  const mktStats = marketId !== 'all' ? computeMarketStats(trades, marketId) : null
+
   const sortedWallets = [...WALLETS]
-    .map(w => ({ ...w, ...(hcMap[w.address] ?? {}) }))
+    .map(w => {
+      const hc = hcMap[w.address] ?? {}
+      // Override tradeCount with per-market count when a market is selected
+      const marketTradeCount = mktStats ? (mktStats.counts[w.address.toLowerCase()] ?? 0) : null
+      return {
+        ...w,
+        ...hc,
+        tradeCount: marketTradeCount ?? hc.tradeCount ?? 0,
+      }
+    })
     .sort((a, b) => {
       const fn = SORT_KEYS[sortKey] ?? (x => x.name)
       const va = fn(a)
@@ -103,17 +147,55 @@ export default function PlayersTab({ trades = [], humanCapital = [] }) {
     )
   }
 
+  const selectedMktMeta = SIGNALS_ONLY.find(m => m.id === marketId)
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+
+      {/* Market selector */}
+      <div className="card" style={{ paddingBottom: 10 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap' }}>
+          <span style={{ fontSize: 12, color: 'var(--fg2)', fontFamily: 'var(--mono)', whiteSpace: 'nowrap' }}>
+            Filter by market:
+          </span>
+          <MarketSelector selected={marketId} onChange={id => { setMarketId(id); setExpanded(null) }} />
+        </div>
+
+        {/* Per-market leader */}
+        {mktStats?.leader && (
+          <div style={{ marginTop: 10, display: 'flex', alignItems: 'center', gap: 8 }}>
+            <span style={{ fontSize: 11, color: 'var(--fg2)' }}>Market leader:</span>
+            <span className="leader-badge">
+              <span className="leader-badge-crown">★</span>
+              <span className="leader-badge-name">{mktStats.leader.name}</span>
+              <span className="leader-badge-stat">{mktStats.leader.count} trades</span>
+              {selectedMktMeta?.label && (
+                <span style={{ color: 'var(--fg2)', fontSize: 10 }}>in {selectedMktMeta.label}</span>
+              )}
+            </span>
+          </div>
+        )}
+      </div>
+
       <div className="card">
-        <div className="card-title">Trader Performance — Click row to expand trade history</div>
+        <div className="card-title">
+          Trader Performance
+          {marketId !== 'all' && (
+            <span style={{ color: 'var(--fg2)', fontWeight: 400, marginLeft: 8 }}>
+              — {selectedMktMeta?.label ?? marketId}
+            </span>
+          )}
+          <span style={{ color: 'var(--fg2)', fontWeight: 400, fontSize: 11, marginLeft: 8 }}>
+            · Click row to expand trade history
+          </span>
+        </div>
         <table className="data-table" style={{ width: '100%' }}>
           <thead>
             <tr>
               <SortTh label="Trader"       k="name" />
               <th>Group</th>
               <th style={{ fontFamily: 'var(--mono)', fontSize: 10 }}>Address</th>
-              <SortTh label="Trades"       k="tradeCount" />
+              <SortTh label={marketId !== 'all' ? 'Trades (Market)' : 'Trades'} k="tradeCount" />
               <SortTh label="Brier Score"  k="bs" />
               <SortTh label="IC"           k="ic" />
               <SortTh label="IAS"          k="ias" />
@@ -156,6 +238,7 @@ export default function PlayersTab({ trades = [], humanCapital = [] }) {
                       key={`${w.address}-detail`}
                       trader={w}
                       trades={trades}
+                      marketFilter={marketId}
                     />
                   )}
                 </>

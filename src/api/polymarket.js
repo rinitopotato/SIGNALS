@@ -60,11 +60,20 @@ function normaliseGammaEvent(slug, event) {
 }
 
 // ── Fetch full market detail and enrich with clobTokenIds ──────────
-export async function enrichEventMarkets(gammaEvent) {
+// Limited to top 5 markets by volume to avoid excessive API calls for
+// large events (FIFA has 30+ teams, Spotify has 20+ artists, etc.)
+export async function enrichEventMarkets(gammaEvent, maxMarkets = 5) {
   if (gammaEvent.error) return gammaEvent
 
+  // Sort by volume descending, keep top N
+  const topMarkets = [...gammaEvent.markets]
+    .sort((a, b) => (b.volume || 0) - (a.volume || 0))
+    .slice(0, maxMarkets)
+
+  console.log(`[PM] Enriching ${topMarkets.length}/${gammaEvent.markets.length} markets for "${gammaEvent.title}"`)
+
   const enriched = await Promise.allSettled(
-    gammaEvent.markets.map(async m => {
+    topMarkets.map(async m => {
       // If we already have token IDs from the event-level stub, use them
       if (m.clobTokenIds?.length) return m
       // Otherwise fetch full market data
@@ -93,14 +102,14 @@ export async function enrichEventMarkets(gammaEvent) {
   return {
     ...gammaEvent,
     markets: enriched.map((r, i) =>
-      r.status === 'fulfilled' ? r.value : gammaEvent.markets[i]
+      r.status === 'fulfilled' ? r.value : topMarkets[i]
     ),
   }
 }
 
 // ── CLOB — price history per token ────────────────────────────────
 // tokenId is a numeric string from clobTokenIds (not a condition hash).
-export async function fetchCLOBHistory(tokenId, interval = '1h', fidelity = 60) {
+export async function fetchCLOBHistory(tokenId, interval = '1w', fidelity = 60) {
   if (!tokenId) return []
   try {
     const url = `${CLOB_BASE}/prices-history?market=${encodeURIComponent(tokenId)}&interval=${interval}&fidelity=${fidelity}`
@@ -143,14 +152,15 @@ export async function fetchEventHistories(gammaEvent) {
 
   const marketsWithHistory = await Promise.allSettled(
     gammaEvent.markets.map(async m => {
-      const tokenIds = m.clobTokenIds ?? []
+      // Limit to first 2 tokens (Yes / No) to avoid excessive API calls
+      const tokenIds = (m.clobTokenIds ?? []).slice(0, 2)
       if (!tokenIds.length) {
         console.warn(`[PM] No token IDs for market "${m.question?.slice(0,40)}"`)
         return { ...m, tokenHistories: [] }
       }
 
       const histories = await Promise.allSettled(
-        tokenIds.map(tid => fetchCLOBHistory(tid))
+        tokenIds.map(tid => fetchCLOBHistory(tid, '1w', 60))
       )
       const tokenHistories = tokenIds.map((tid, i) => ({
         tokenId: tid,

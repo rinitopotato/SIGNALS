@@ -1,7 +1,10 @@
+import { useState, useMemo } from 'react'
 import BarChartPanel from '../components/charts/BarChartPanel.jsx'
 import PriceLineChart from '../components/charts/PriceLineChart.jsx'
 import MetricBadge from '../components/cards/MetricBadge.jsx'
+import MarketSelector, { SIGNALS_ONLY } from '../components/layout/MarketSelector.jsx'
 import { WALLETS } from '../constants/wallets.js'
+import { SIGNALS_MARKETS } from '../constants/markets.js'
 import { toJSTShort, formatNum, formatPct } from '../utils/formatters.js'
 
 function SectionTitle({ children }) {
@@ -18,6 +21,36 @@ function MiniStat({ label, value, color }) {
 }
 
 export default function AnalyticsTab({ metrics, bojSeries = [], humanCapital = [], trades = [] }) {
+  const [marketId, setMarketId] = useState('all')
+
+  // Filter trades by selected market for per-market HC stats
+  const filteredTrades = useMemo(() => {
+    if (marketId === 'all') return trades
+    const mkt = SIGNALS_MARKETS.find(m => m.id === marketId)
+    if (!mkt) return trades
+    const addr = mkt.address.toLowerCase()
+    return trades.filter(t => t.market === addr)
+  }, [trades, marketId])
+
+  // Per-market trade count for leaderboard
+  const perMarketCounts = useMemo(() => {
+    const counts = {}
+    filteredTrades.forEach(t => {
+      counts[t.trader] = (counts[t.trader] ?? 0) + 1
+    })
+    return counts
+  }, [filteredTrades])
+
+  const leader = useMemo(() => {
+    if (marketId === 'all') return null
+    const top = Object.entries(perMarketCounts).sort((a, b) => b[1] - a[1])[0]
+    if (!top) return null
+    const wallet = WALLETS.find(w => w.address.toLowerCase() === top[0])
+    return wallet ? { name: wallet.name, count: top[1] } : null
+  }, [perMarketCounts, marketId])
+
+  const selectedMktMeta = SIGNALS_ONLY.find(m => m.id === marketId)
+
   const {
     signalZoo, variantICs, ensembleSignal, decomposition, icByLag, kStar, les,
     divergenceSignal, compositeIndex, cg, wfa, mcp, rstResult, actionableThreshold,
@@ -88,6 +121,29 @@ export default function AnalyticsTab({ metrics, bojSeries = [], humanCapital = [
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
 
+      {/* ── Market selector ──────────────────────────────────── */}
+      <div className="card" style={{ marginBottom: 16, paddingBottom: 10 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap' }}>
+          <span style={{ fontSize: 12, color: 'var(--fg2)', fontFamily: 'var(--mono)', whiteSpace: 'nowrap' }}>
+            Analyze market:
+          </span>
+          <MarketSelector selected={marketId} onChange={setMarketId} />
+        </div>
+        {leader && (
+          <div style={{ marginTop: 10, display: 'flex', alignItems: 'center', gap: 8 }}>
+            <span style={{ fontSize: 11, color: 'var(--fg2)' }}>Market leader:</span>
+            <span className="leader-badge">
+              <span className="leader-badge-crown">★</span>
+              <span className="leader-badge-name">{leader.name}</span>
+              <span className="leader-badge-stat">{leader.count} trades</span>
+              {selectedMktMeta?.label && (
+                <span style={{ color: 'var(--fg2)', fontSize: 10 }}>in {selectedMktMeta.label}</span>
+              )}
+            </span>
+          </div>
+        )}
+      </div>
+
       {/* ── Lens 1: Human Capital ────────────────────────────── */}
       <div className="analytics-section card">
         <SectionTitle>Lens 1 — Human Capital Analytics</SectionTitle>
@@ -109,19 +165,22 @@ export default function AnalyticsTab({ metrics, bojSeries = [], humanCapital = [
           <table className="data-table" style={{ width: '100%' }}>
             <thead>
               <tr>
-                <th>Trader</th><th>Group</th><th>Trades</th>
+                <th>Trader</th><th>Group</th>
+                <th>{marketId !== 'all' ? `Trades (${selectedMktMeta?.label ?? marketId})` : 'Trades'}</th>
                 <th>Brier Score</th><th>IC</th><th>IAS</th>
                 <th>Noise Sens.</th><th>Last Trade</th>
               </tr>
             </thead>
             <tbody>
-              {WALLETS.map(w => {
-                const hc = hcMap[w.address] ?? {}
+              {WALLETS
+                .map(w => ({ w, hc: hcMap[w.address] ?? {}, mktCount: perMarketCounts[w.address.toLowerCase()] ?? 0 }))
+                .sort((a, b) => marketId !== 'all' ? b.mktCount - a.mktCount : (b.hc.tradeCount ?? 0) - (a.hc.tradeCount ?? 0))
+                .map(({ w, hc, mktCount }) => {
                 return (
                   <tr key={w.address}>
                     <td style={{ color: 'var(--accent)', fontWeight: 700 }}>{w.name}</td>
                     <td style={{ color: 'var(--fg2)' }}>{w.group}</td>
-                    <td>{hc.tradeCount ?? 0}</td>
+                    <td>{marketId !== 'all' ? mktCount : (hc.tradeCount ?? 0)}</td>
                     <td style={{ color: hc.bs != null ? (hc.bs < 0.2 ? 'var(--green)' : hc.bs < 0.35 ? 'var(--amber)' : 'var(--red)') : 'var(--fg2)' }}>
                       {hc.bs != null ? hc.bs.toFixed(3) : '—'}
                     </td>

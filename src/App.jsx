@@ -76,10 +76,11 @@ export default function App() {
           <SignalEngineeringTab
             bojSeries={metrics.bojSeries ?? []}
             metrics={metrics}
+            snapshots={goldsky.snapshots}
           />
         )
       case 'network':
-        return <NetworkTab metrics={metrics} />
+        return <NetworkTab metrics={metrics} trades={goldsky.trades} snapshots={goldsky.snapshots} />
       case 'players':
         return (
           <PlayersTab

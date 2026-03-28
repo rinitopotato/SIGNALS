@@ -1,19 +1,66 @@
+import { useState, useMemo } from 'react'
 import HeatmapGrid from '../components/charts/HeatmapGrid.jsx'
 import BarChartPanel from '../components/charts/BarChartPanel.jsx'
 import NetworkGraph from '../components/network/NetworkGraph.jsx'
 import MetricBadge from '../components/cards/MetricBadge.jsx'
+import MarketSelector, { SIGNALS_ONLY } from '../components/layout/MarketSelector.jsx'
 import { WALLETS } from '../constants/wallets.js'
+import { SIGNALS_MARKETS } from '../constants/markets.js'
 import { formatNum } from '../utils/formatters.js'
+import { buildJaccardMatrix, centralityScores, clusteringCoefficients } from '../utils/social.js'
 
-export default function NetworkTab({ metrics = {} }) {
+// Compute per-market leader (most trades in market)
+function marketLeader(trades, marketId) {
+  if (!marketId || marketId === 'all') return null
+  const mkt = SIGNALS_MARKETS.find(m => m.id === marketId)
+  if (!mkt) return null
+  const addr = mkt.address.toLowerCase()
+  const counts = {}
+  trades.filter(t => t.market === addr).forEach(t => {
+    counts[t.trader] = (counts[t.trader] ?? 0) + 1
+  })
+  const top = Object.entries(counts).sort((a, b) => b[1] - a[1])[0]
+  if (!top) return null
+  const wallet = WALLETS.find(w => w.address.toLowerCase() === top[0])
+  return wallet ? { name: wallet.name, count: top[1] } : null
+}
+
+export default function NetworkTab({ metrics = {}, trades = [], snapshots = [] }) {
+  const [marketId, setMarketId] = useState('all')
+
   const {
-    jaccardMatrix, centralities, clusteringCCs, followerMults,
+    jaccardMatrix: globalJaccard,
+    centralities: globalCentralities,
+    clusteringCCs: globalCCs,
+    followerMults,
     scs, hs, resilience, humanCapital,
   } = metrics
 
+  // Filter trades by selected market for per-market matrix
+  const filteredTrades = useMemo(() => {
+    if (marketId === 'all') return trades
+    const mkt = SIGNALS_MARKETS.find(m => m.id === marketId)
+    if (!mkt) return trades
+    const addr = mkt.address.toLowerCase()
+    return trades.filter(t => t.market === addr)
+  }, [trades, marketId])
+
+  // Recompute Jaccard + centrality for filtered trades
+  const jaccardMatrix = useMemo(
+    () => filteredTrades.length ? buildJaccardMatrix(filteredTrades, WALLETS) : (globalJaccard ?? []),
+    [filteredTrades, globalJaccard]
+  )
+  const centralities = useMemo(
+    () => filteredTrades.length ? centralityScores(filteredTrades, WALLETS) : (globalCentralities ?? []),
+    [filteredTrades, globalCentralities]
+  )
+  const clusteringCCs = useMemo(
+    () => jaccardMatrix.length ? clusteringCoefficients(jaccardMatrix, WALLETS) : (globalCCs ?? []),
+    [jaccardMatrix, globalCCs]
+  )
+
   const walletNames = WALLETS.map(w => w.name)
 
-  // HC bar chart data
   const hcData = (humanCapital ?? []).map(h => ({
     label: h.name,
     bs:    h.bs ?? 0,
@@ -21,14 +68,14 @@ export default function NetworkTab({ metrics = {} }) {
     ias:   h.ias ?? 0,
   }))
 
-  const centralityData = (centralities ?? []).map(c => ({
-    label: c.name,
-    value: c.centrality,
+  const centralityData = (centralities ?? []).map((c, i) => ({
+    label: WALLETS[i]?.name ?? `T${i}`,
+    value: typeof c === 'object' ? c.centrality : (c ?? 0),
   }))
 
-  const ccData = (clusteringCCs ?? []).map(c => ({
-    label: c.name,
-    value: c.cc,
+  const ccData = (clusteringCCs ?? []).map((c, i) => ({
+    label: WALLETS[i]?.name ?? `T${i}`,
+    value: typeof c === 'object' ? c.cc : (c ?? 0),
   }))
 
   const fmData = (followerMults ?? []).map(f => ({
@@ -36,13 +83,47 @@ export default function NetworkTab({ metrics = {} }) {
     value: f.fm ?? 0,
   }))
 
+  const leader = useMemo(() => marketLeader(trades, marketId), [trades, marketId])
+  const selectedMktMeta = SIGNALS_ONLY.find(m => m.id === marketId)
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+
+      {/* Market selector */}
+      <div className="card" style={{ paddingBottom: 10 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap' }}>
+          <span style={{ fontSize: 12, color: 'var(--fg2)', fontFamily: 'var(--mono)', whiteSpace: 'nowrap' }}>
+            Filter network by market:
+          </span>
+          <MarketSelector selected={marketId} onChange={setMarketId} />
+        </div>
+        {leader && (
+          <div style={{ marginTop: 10, display: 'flex', alignItems: 'center', gap: 8 }}>
+            <span style={{ fontSize: 11, color: 'var(--fg2)' }}>Market leader:</span>
+            <span className="leader-badge">
+              <span className="leader-badge-crown">★</span>
+              <span className="leader-badge-name">{leader.name}</span>
+              <span className="leader-badge-stat">{leader.count} trades</span>
+              {selectedMktMeta?.label && (
+                <span style={{ color: 'var(--fg2)', fontSize: 10 }}>in {selectedMktMeta.label}</span>
+              )}
+            </span>
+          </div>
+        )}
+        {marketId !== 'all' && (
+          <div style={{ marginTop: 6, fontSize: 11, color: 'var(--fg2)' }}>
+            Jaccard matrix and centrality computed from {filteredTrades.length} trades in {selectedMktMeta?.label ?? marketId}.
+          </div>
+        )}
+      </div>
 
       {/* Row 1: Jaccard matrix + Network graph */}
       <div className="panel-grid panel-grid-2">
         <div className="card">
-          <div className="card-title">Jaccard Co-Participation Matrix (9×9)</div>
+          <div className="card-title">
+            Jaccard Co-Participation Matrix (9×9)
+            {marketId !== 'all' && <span style={{ color: 'var(--fg2)', fontWeight: 400 }}> — {selectedMktMeta?.label}</span>}
+          </div>
           <HeatmapGrid
             matrix={jaccardMatrix ?? WALLETS.map(() => WALLETS.map(() => 0))}
             rowLabels={walletNames}
@@ -56,7 +137,10 @@ export default function NetworkTab({ metrics = {} }) {
         </div>
 
         <div className="card">
-          <div className="card-title">Force-Directed Network Graph (Jaccard &gt; 0.2)</div>
+          <div className="card-title">
+            Force-Directed Network Graph (Jaccard &gt; 0.2)
+            {marketId !== 'all' && <span style={{ color: 'var(--fg2)', fontWeight: 400 }}> — {selectedMktMeta?.label}</span>}
+          </div>
           <NetworkGraph
             wallets={WALLETS}
             jaccardMatrix={jaccardMatrix ?? []}
